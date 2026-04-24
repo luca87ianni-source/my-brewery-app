@@ -1,0 +1,16 @@
+{
+    "Fermentabili": {
+        "Pale Ale": 5.4,
+        "Fiocchi d\u2019orzo": 0.3,
+        "Fiocchi d\u2019avena": 0.4,
+        "Fiocchi di frumento": 0.4,
+        "Fiocchi di riso": 0.1
+    },
+    "Luppoli": {
+        "Columbus (CTZ)": 73.0,
+        "Pacific Jade": 40.0
+    },
+    "Lieviti": {
+        "Safale US-05": 1.0
+    }
+}

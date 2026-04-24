@@ -1,0 +1,182 @@
+{
+    "Pilsner": {
+        "EBC": 3.0,
+        "PPG": 37
+    },
+    "Pale Ale": {
+        "EBC": 5.5,
+        "PPG": 36
+    },
+    "Lager": {
+        "EBC": 4.5,
+        "PPG": 37
+    },
+    "Vienna": {
+        "EBC": 8.0,
+        "PPG": 36
+    },
+    "Monaco chiaro": {
+        "EBC": 15.0,
+        "PPG": 35
+    },
+    "Monaco scuro": {
+        "EBC": 21.5,
+        "PPG": 34
+    },
+    "Mild Ale": {
+        "EBC": 7.5,
+        "PPG": 36
+    },
+    "Maris Otter": {
+        "EBC": 6.0,
+        "PPG": 36
+    },
+    "Golden Promise": {
+        "EBC": 5.0,
+        "PPG": 36
+    },
+    "Wheat chiaro": {
+        "EBC": 4.0,
+        "PPG": 38
+    },
+    "Wheat scuro": {
+        "EBC": 20.0,
+        "PPG": 36
+    },
+    "Rye": {
+        "EBC": 7.5,
+        "PPG": 35
+    },
+    "Carapils / Dextrin": {
+        "EBC": 3.5,
+        "PPG": 34
+    },
+    "Carahell": {
+        "EBC": 25.0,
+        "PPG": 34
+    },
+    "Caramel Light": {
+        "EBC": 40.0,
+        "PPG": 34
+    },
+    "Caramel Medium": {
+        "EBC": 90.0,
+        "PPG": 33
+    },
+    "Caramel Dark": {
+        "EBC": 185.0,
+        "PPG": 32
+    },
+    "Crystal 150": {
+        "EBC": 150.0,
+        "PPG": 32
+    },
+    "Crystal 300": {
+        "EBC": 300.0,
+        "PPG": 31
+    },
+    "Chocolate": {
+        "EBC": 750.0,
+        "PPG": 29
+    },
+    "Dark Chocolate": {
+        "EBC": 1050.0,
+        "PPG": 28
+    },
+    "Black Malt": {
+        "EBC": 1350.0,
+        "PPG": 27
+    },
+    "Roasted Barley": {
+        "EBC": 1250.0,
+        "PPG": 27
+    },
+    "Biscuit": {
+        "EBC": 50.0,
+        "PPG": 35
+    },
+    "Victory": {
+        "EBC": 50.0,
+        "PPG": 35
+    },
+    "Amber": {
+        "EBC": 65.0,
+        "PPG": 35
+    },
+    "Brown": {
+        "EBC": 90.0,
+        "PPG": 33
+    },
+    "Carafoam": {
+        "EBC": 3.5,
+        "PPG": 34
+    },
+    "Melanoidin": {
+        "EBC": 80.0,
+        "PPG": 33
+    },
+    "Acidulated": {
+        "EBC": 4.5,
+        "PPG": 35
+    },
+    "Smoked": {
+        "EBC": 6.5,
+        "PPG": 36
+    },
+    "Special B": {
+        "EBC": 350.0,
+        "PPG": 31
+    },
+    "Carafa I": {
+        "EBC": 800.0,
+        "PPG": 29
+    },
+    "Carafa II": {
+        "EBC": 1100.0,
+        "PPG": 28
+    },
+    "Carafa III": {
+        "EBC": 1300.0,
+        "PPG": 27
+    },
+    "Fiocchi d’avena": {
+        "EBC": 2.0,
+        "PPG": 33
+    },
+    "Fiocchi d’orzo": {
+        "EBC": 2.0,
+        "PPG": 32
+    },
+    "Fiocchi di frumento": {
+        "EBC": 2.0,
+        "PPG": 34
+    },
+    "Fiocchi di riso": {
+        "EBC": 1.0,
+        "PPG": 35
+    },
+    "Fiocchi di mais": {
+        "EBC": 1.0,
+        "PPG": 36
+    },
+    "Zucchero bianco": {
+        "EBC": 0.0,
+        "PPG": 46
+    },
+    "Zucchero di canna": {
+        "EBC": 5.0,
+        "PPG": 46
+    },
+    "Zucchero candito chiaro": {
+        "EBC": 10.0,
+        "PPG": 46
+    },
+    "Zucchero candito scuro": {
+        "EBC": 300.0,
+        "PPG": 46
+    },
+    "Carared": {
+        "EBC": 45.0,
+        "PPG": 34
+    }
+}

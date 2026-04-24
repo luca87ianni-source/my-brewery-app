@@ -1,0 +1,594 @@
+{
+    "La PierIPA": {
+        "stile": "NEIPA",
+        "data_imbottigliamento": "2026-04-22",
+        "litri": 25.0,
+        "data": "2026-04-22",
+        "fermentabili": [
+            {
+                "nome": "Pale Ale",
+                "kg": 5.4,
+                "ppg": 36.0,
+                "ebc": 5.5
+            },
+            {
+                "nome": "Fiocchi d\u2019orzo",
+                "kg": 0.3,
+                "ppg": 32.0,
+                "ebc": 2.0
+            },
+            {
+                "nome": "Fiocchi d\u2019avena",
+                "kg": 0.4,
+                "ppg": 33.0,
+                "ebc": 2.0
+            },
+            {
+                "nome": "Fiocchi di frumento",
+                "kg": 0.4,
+                "ppg": 34.0,
+                "ebc": 2.0
+            },
+            {
+                "nome": "Fiocchi di riso",
+                "kg": 0.1,
+                "ppg": 35.0,
+                "ebc": 1.0
+            }
+        ],
+        "luppoli": [
+            {
+                "nome": "Columbus (CTZ)",
+                "grammi": 10,
+                "tipo": "Boil",
+                "valore_tempo": 60,
+                "aa": 16.0
+            },
+            {
+                "nome": "Columbus (CTZ)",
+                "grammi": 40,
+                "tipo": "Boil",
+                "valore_tempo": 10,
+                "aa": 16.0
+            },
+            {
+                "nome": "Pacific Jade",
+                "grammi": 40,
+                "tipo": "Boil",
+                "valore_tempo": 10,
+                "aa": 12.5
+            },
+            {
+                "nome": "Columbus (CTZ)",
+                "grammi": 23,
+                "tipo": "Hopstand",
+                "valore_tempo": 80,
+                "aa": 16.0
+            },
+            {
+                "nome": "Pacific Jade",
+                "grammi": 60,
+                "tipo": "Dry Hop",
+                "valore_tempo": 3,
+                "aa": 12.5
+            },
+            {
+                "nome": "Columbus (CTZ)",
+                "grammi": 50,
+                "tipo": "Dry Hop",
+                "valore_tempo": 3,
+                "aa": 16.0
+            }
+        ],
+        "yeast": {
+            "nome": "Safale US-05",
+            "attenuazione": 79.0
+        },
+        "mash_steps": [
+            {
+                "temp": 65,
+                "tempo": 60
+            },
+            {
+                "temp": 78,
+                "tempo": 10
+            }
+        ]
+    },
+    "La Tennent's": {
+        "stile": "WeeHeavy",
+        "data_imbottigliamento": "2026-04-23",
+        "litri": 20.0,
+        "data": "2026-04-23",
+        "fermentabili": [
+            {
+                "nome": "Pale Ale",
+                "kg": 5.6,
+                "ppg": 36.0,
+                "ebc": 5.5
+            },
+            {
+                "nome": "Monaco chiaro",
+                "kg": 0.6,
+                "ppg": 35.0,
+                "ebc": 15.0
+            },
+            {
+                "nome": "Carared",
+                "kg": 0.3,
+                "ppg": 34.0,
+                "ebc": 45.0
+            },
+            {
+                "nome": "Chocolate",
+                "kg": 0.1,
+                "ppg": 29.0,
+                "ebc": 750.0
+            },
+            {
+                "nome": "Zucchero bianco",
+                "kg": 0.1,
+                "ppg": 46.0,
+                "ebc": 0.0
+            },
+            {
+                "nome": "Zucchero candito scuro",
+                "kg": 0.1,
+                "ppg": 46.0,
+                "ebc": 300.0
+            }
+        ],
+        "luppoli": [
+            {
+                "nome": "East Kent Goldings",
+                "grammi": 25.0,
+                "tipo": "Boil",
+                "valore_tempo": 60,
+                "aa": 5.0
+            },
+            {
+                "nome": "Styrian Goldings",
+                "grammi": 15.0,
+                "tipo": "Boil",
+                "valore_tempo": 30,
+                "aa": 4.5
+            }
+        ],
+        "yeast": {
+            "nome": "Safale S-04",
+            "attenuazione": 79.0
+        },
+        "mash_steps": [
+            {
+                "temp": 67,
+                "tempo": 60
+            },
+            {
+                "temp": 78,
+                "tempo": 10
+            }
+        ],
+        "og_reale": 1.05,
+        "fg_reale": 1.01,
+        "abv_reale": 5.750000000000004
+    },
+    "La Ghinness": {
+        "stile": "Irish Stout",
+        "data_imbottigliamento": "2026-04-23",
+        "litri": 23.0,
+        "data": "2026-04-23",
+        "fermentabili": [
+            {
+                "nome": "Pale Ale",
+                "kg": 4.0,
+                "ppg": 36.0,
+                "ebc": 5.5
+            },
+            {
+                "nome": "Roasted Barley",
+                "kg": 0.6,
+                "ppg": 27.0,
+                "ebc": 1250.0
+            },
+            {
+                "nome": "Carared",
+                "kg": 0.3,
+                "ppg": 34.0,
+                "ebc": 45.0
+            }
+        ],
+        "luppoli": [
+            {
+                "nome": "East Kent Goldings",
+                "grammi": 35.0,
+                "tipo": "Boil",
+                "valore_tempo": 60,
+                "aa": 5.0
+            },
+            {
+                "nome": "East Kent Goldings",
+                "grammi": 10.0,
+                "tipo": "Boil",
+                "valore_tempo": 30,
+                "aa": 5.0
+            }
+        ],
+        "yeast": {
+            "nome": "Safale US-05",
+            "attenuazione": 79.0
+        },
+        "mash_steps": [
+            {
+                "temp": 67,
+                "tempo": 60
+            },
+            {
+                "temp": 78,
+                "tempo": 10
+            }
+        ],
+        "og_reale": 1.05,
+        "fg_reale": 1.01,
+        "abv_reale": 5.750000000000004
+    },
+    "La Baldracca": {
+        "stile": "English Bitter",
+        "data_imbottigliamento": "2026-04-23",
+        "litri": 23.0,
+        "data": "2026-04-23",
+        "fermentabili": [
+            {
+                "nome": "Pale Ale",
+                "kg": 4.0,
+                "ppg": 36.0,
+                "ebc": 5.5
+            },
+            {
+                "nome": "Carared",
+                "kg": 0.4,
+                "ppg": 34.0,
+                "ebc": 45.0
+            },
+            {
+                "nome": "Roasted Barley",
+                "kg": 0.1,
+                "ppg": 27.0,
+                "ebc": 1250.0
+            }
+        ],
+        "luppoli": [
+            {
+                "nome": "East Kent Goldings",
+                "grammi": 25.0,
+                "tipo": "Boil",
+                "valore_tempo": 60,
+                "aa": 5.0
+            },
+            {
+                "nome": "East Kent Goldings",
+                "grammi": 15.0,
+                "tipo": "Boil",
+                "valore_tempo": 30,
+                "aa": 5.0
+            }
+        ],
+        "yeast": {
+            "nome": "Safale S-04",
+            "attenuazione": 79.0
+        },
+        "mash_steps": [
+            {
+                "temp": 67,
+                "tempo": 60
+            },
+            {
+                "temp": 78,
+                "tempo": 10
+            }
+        ],
+        "og_reale": 1.05,
+        "fg_reale": 1.01,
+        "abv_reale": 5.750000000000004
+    },
+    "La Sescion": {
+        "stile": "Session IPA",
+        "data_imbottigliamento": "2026-04-23",
+        "litri": 23.0,
+        "data": "2026-04-23",
+        "fermentabili": [
+            {
+                "nome": "Pale Ale",
+                "kg": 4.2,
+                "ppg": 36.0,
+                "ebc": 5.5
+            },
+            {
+                "nome": "Fiocchi di riso",
+                "kg": 0.6,
+                "ppg": 35.0,
+                "ebc": 1.0
+            }
+        ],
+        "luppoli": [
+            {
+                "nome": "Columbus (CTZ)",
+                "grammi": 56.0,
+                "tipo": "Boil",
+                "valore_tempo": 60,
+                "aa": 16.0
+            },
+            {
+                "nome": "Columbus (CTZ)",
+                "grammi": 28.0,
+                "tipo": "Boil",
+                "valore_tempo": 15,
+                "aa": 16.0
+            },
+            {
+                "nome": "Centennial",
+                "grammi": 20.0,
+                "tipo": "Boil",
+                "valore_tempo": 15,
+                "aa": 10.5
+            },
+            {
+                "nome": "Cascade",
+                "grammi": 15.0,
+                "tipo": "Hopstand",
+                "valore_tempo": 80,
+                "aa": 5.75
+            },
+            {
+                "nome": "Mosaic",
+                "grammi": 20.0,
+                "tipo": "Hopstand",
+                "valore_tempo": 80,
+                "aa": 12.5
+            },
+            {
+                "nome": "El Dorado",
+                "grammi": 35.0,
+                "tipo": "Hopstand",
+                "valore_tempo": 80,
+                "aa": 12.8
+            },
+            {
+                "nome": "El Dorado",
+                "grammi": 35.0,
+                "tipo": "Dry Hop",
+                "valore_tempo": 4,
+                "aa": 12.8
+            },
+            {
+                "nome": "Columbus (CTZ)",
+                "grammi": 28.0,
+                "tipo": "Dry Hop",
+                "valore_tempo": 4,
+                "aa": 16.0
+            },
+            {
+                "nome": "Centennial",
+                "grammi": 20.0,
+                "tipo": "Dry Hop",
+                "valore_tempo": 4,
+                "aa": 10.5
+            }
+        ],
+        "yeast": {
+            "nome": "Safale US-05",
+            "attenuazione": 79.0
+        },
+        "mash_steps": [
+            {
+                "temp": 67,
+                "tempo": 60
+            },
+            {
+                "temp": 78,
+                "tempo": 10
+            }
+        ],
+        "og_reale": 1.05,
+        "fg_reale": 1.01,
+        "abv_reale": 5.750000000000004
+    },
+    "Double IPA": {
+        "stile": "Double IPA",
+        "data_imbottigliamento": "2026-04-23",
+        "litri": 21.0,
+        "data": "2026-04-23",
+        "fermentabili": [
+            {
+                "nome": "Pale Ale",
+                "kg": 6.0,
+                "ppg": 36.0,
+                "ebc": 5.5
+            },
+            {
+                "nome": "Fiocchi di frumento",
+                "kg": 0.2,
+                "ppg": 34.0,
+                "ebc": 2.0
+            },
+            {
+                "nome": "Carapils / Dextrin",
+                "kg": 0.2,
+                "ppg": 34.0,
+                "ebc": 3.5
+            },
+            {
+                "nome": "Zucchero bianco",
+                "kg": 0.5,
+                "ppg": 46.0,
+                "ebc": 0.0
+            }
+        ],
+        "luppoli": [
+            {
+                "nome": "Columbus (CTZ)",
+                "grammi": 15.0,
+                "tipo": "Boil",
+                "valore_tempo": 60,
+                "aa": 16.0
+            },
+            {
+                "nome": "Centennial",
+                "grammi": 15.0,
+                "tipo": "Boil",
+                "valore_tempo": 60,
+                "aa": 10.5
+            },
+            {
+                "nome": "Cascade",
+                "grammi": 30.0,
+                "tipo": "Boil",
+                "valore_tempo": 15,
+                "aa": 5.75
+            },
+            {
+                "nome": "Mosaic",
+                "grammi": 50.0,
+                "tipo": "Hopstand",
+                "valore_tempo": 80,
+                "aa": 12.5
+            },
+            {
+                "nome": "Cascade",
+                "grammi": 30.0,
+                "tipo": "Hopstand",
+                "valore_tempo": 80,
+                "aa": 5.75
+            },
+            {
+                "nome": "Centennial",
+                "grammi": 15.0,
+                "tipo": "Hopstand",
+                "valore_tempo": 80,
+                "aa": 10.5
+            },
+            {
+                "nome": "Mosaic",
+                "grammi": 50.0,
+                "tipo": "Dry Hop",
+                "valore_tempo": 4,
+                "aa": 12.5
+            },
+            {
+                "nome": "El Dorado",
+                "grammi": 50.0,
+                "tipo": "Dry Hop",
+                "valore_tempo": 4,
+                "aa": 12.8
+            },
+            {
+                "nome": "Centennial",
+                "grammi": 30.0,
+                "tipo": "Dry Hop",
+                "valore_tempo": 4,
+                "aa": 10.5
+            },
+            {
+                "nome": "Cascade",
+                "grammi": 25.0,
+                "tipo": "Dry Hop",
+                "valore_tempo": 4,
+                "aa": 5.75
+            }
+        ],
+        "yeast": {
+            "nome": "Safale US-05",
+            "attenuazione": 79.0
+        },
+        "mash_steps": [],
+        "og_reale": 1.05,
+        "fg_reale": 1.01,
+        "abv_reale": 5.750000000000004
+    },
+    "Lariana": {
+        "stile": "White IPA",
+        "data_imbottigliamento": "2026-04-23",
+        "litri": 24.0,
+        "data": "2026-04-23",
+        "fermentabili": [
+            {
+                "nome": "Pilsner",
+                "kg": 3.5,
+                "ppg": 37.0,
+                "ebc": 3.0
+            },
+            {
+                "nome": "Wheat chiaro",
+                "kg": 1.5,
+                "ppg": 38.0,
+                "ebc": 4.0
+            },
+            {
+                "nome": "Fiocchi di frumento",
+                "kg": 1.0,
+                "ppg": 34.0,
+                "ebc": 2.0
+            }
+        ],
+        "luppoli": [
+            {
+                "nome": "Galaxy",
+                "grammi": 20.0,
+                "tipo": "Boil",
+                "valore_tempo": 60,
+                "aa": 13.5
+            },
+            {
+                "nome": "Mosaic",
+                "grammi": 10.0,
+                "tipo": "Boil",
+                "valore_tempo": 30,
+                "aa": 12.5
+            },
+            {
+                "nome": "Galaxy",
+                "grammi": 10.0,
+                "tipo": "Boil",
+                "valore_tempo": 15,
+                "aa": 13.5
+            },
+            {
+                "nome": "Mosaic",
+                "grammi": 10.0,
+                "tipo": "Boil",
+                "valore_tempo": 15,
+                "aa": 12.5
+            },
+            {
+                "nome": "Galaxy",
+                "grammi": 30.0,
+                "tipo": "Hopstand",
+                "valore_tempo": 80,
+                "aa": 13.5
+            },
+            {
+                "nome": "Mosaic",
+                "grammi": 20.0,
+                "tipo": "Hopstand",
+                "valore_tempo": 80,
+                "aa": 12.5
+            }
+        ],
+        "yeast": {
+            "nome": "Safale US-05",
+            "attenuazione": 79.0
+        },
+        "mash_steps": [
+            {
+                "temp": 67,
+                "tempo": 60
+            },
+            {
+                "temp": 78,
+                "tempo": 10
+            }
+        ],
+        "og_reale": 1.05,
+        "fg_reale": 1.01,
+        "abv_reale": 5.750000000000004
+    }
+}

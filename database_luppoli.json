@@ -1,0 +1,150 @@
+{
+    "Magnum": {
+        "Alfa acidi (%)": 13.5,
+        "Tipo": "Amaro"
+    },
+    "Columbus (CTZ)": {
+        "Alfa acidi (%)": 16.0,
+        "Tipo": "Amaro"
+    },
+    "Tomahawk (CTZ)": {
+        "Alfa acidi (%)": 16.0,
+        "Tipo": "Amaro"
+    },
+    "Zeus (CTZ)": {
+        "Alfa acidi (%)": 16.0,
+        "Tipo": "Amaro"
+    },
+    "Warrior": {
+        "Alfa acidi (%)": 16.0,
+        "Tipo": "Amaro"
+    },
+    "Nugget": {
+        "Alfa acidi (%)": 12.5,
+        "Tipo": "Amaro"
+    },
+    "Chinook": {
+        "Alfa acidi (%)": 13.0,
+        "Tipo": "Amaro"
+    },
+    "Galena": {
+        "Alfa acidi (%)": 13.0,
+        "Tipo": "Amaro"
+    },
+    "Apollo": {
+        "Alfa acidi (%)": 17.0,
+        "Tipo": "Amaro"
+    },
+    "Saaz": {
+        "Alfa acidi (%)": 3.5,
+        "Tipo": "Aroma"
+    },
+    "Hallertau Mittelfrüh": {
+        "Alfa acidi (%)": 4.0,
+        "Tipo": "Aroma"
+    },
+    "Tettnang": {
+        "Alfa acidi (%)": 4.5,
+        "Tipo": "Aroma"
+    },
+    "Spalt": {
+        "Alfa acidi (%)": 4.0,
+        "Tipo": "Aroma"
+    },
+    "Styrian Goldings": {
+        "Alfa acidi (%)": 4.5,
+        "Tipo": "Aroma"
+    },
+    "Fuggle": {
+        "Alfa acidi (%)": 4.5,
+        "Tipo": "Aroma"
+    },
+    "East Kent Goldings": {
+        "Alfa acidi (%)": 5.0,
+        "Tipo": "Aroma"
+    },
+    "Cascade": {
+        "Alfa acidi (%)": 5.75,
+        "Tipo": "Duale"
+    },
+    "Centennial": {
+        "Alfa acidi (%)": 10.5,
+        "Tipo": "Duale"
+    },
+    "Amarillo": {
+        "Alfa acidi (%)": 9.0,
+        "Tipo": "Duale"
+    },
+    "Simcoe": {
+        "Alfa acidi (%)": 13.0,
+        "Tipo": "Duale"
+    },
+    "Citra": {
+        "Alfa acidi (%)": 12.5,
+        "Tipo": "Duale"
+    },
+    "Mosaic": {
+        "Alfa acidi (%)": 12.5,
+        "Tipo": "Duale"
+    },
+    "Ekuanot": {
+        "Alfa acidi (%)": 14.5,
+        "Tipo": "Duale"
+    },
+    "Idaho 7": {
+        "Alfa acidi (%)": 13.5,
+        "Tipo": "Duale"
+    },
+    "Galaxy": {
+        "Alfa acidi (%)": 13.5,
+        "Tipo": "New World"
+    },
+    "Nelson Sauvin": {
+        "Alfa acidi (%)": 12.0,
+        "Tipo": "New World"
+    },
+    "Motueka": {
+        "Alfa acidi (%)": 7.0,
+        "Tipo": "New World"
+    },
+    "Riwaka": {
+        "Alfa acidi (%)": 5.5,
+        "Tipo": "New World"
+    },
+    "Sabro": {
+        "Alfa acidi (%)": 14.0,
+        "Tipo": "New World"
+    },
+    "Strata": {
+        "Alfa acidi (%)": 12.0,
+        "Tipo": "New World"
+    },
+    "Azacca": {
+        "Alfa acidi (%)": 15.0,
+        "Tipo": "New World"
+    },
+    "Sorachi Ace": {
+        "Alfa acidi (%)": 13.0,
+        "Tipo": "Sperimentali"
+    },
+    "Bru-1": {
+        "Alfa acidi (%)": 14.0,
+        "Tipo": "Sperimentali"
+    },
+    "Talus": {
+        "Alfa acidi (%)": 9.0,
+        "Tipo": "Sperimentali"
+    },
+    "HBC 472": {
+        "Alfa acidi (%)": 8.5,
+        "Tipo": "Sperimentali"
+    },
+    "Pacific Jade": {
+        "Alfa acidi (%)": 12.5,
+        "Tipo": "Amaro"
+    },
+    "El Dorado": {
+        "Alfa acidi (%)": 12.8,
+        "Tipo": "Duale"
+    }
+}

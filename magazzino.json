@@ -1,0 +1,49 @@
+{
+    "Fermentabili": {
+        "Pale Ale": {
+            "qta": 1.3,
+            "prezzo": 0.0
+        },
+        "Fiocchi d\u2019avena": {
+            "qta": 0.5,
+            "prezzo": 0.0
+        }
+    },
+    "Luppoli": {
+        "Apollo": {
+            "qta": 21.0,
+            "prezzo": 0.0
+        }
+    },
+    "Lieviti": {},
+    "shopping_list": {
+        "Fermentabili": {
+            "Pale Ale": 29.2,
+            "Fiocchi d\u2019orzo": 0.3,
+            "Fiocchi d\u2019avena": 0.4,
+            "Fiocchi di frumento": 0.6000000000000001,
+            "Fiocchi di riso": 0.7,
+            "Monaco chiaro": 0.6,
+            "Carared": 1.0,
+            "Chocolate": 0.1,
+            "Zucchero bianco": 0.6,
+            "Zucchero candito scuro": 0.1,
+            "Roasted Barley": 0.7,
+            "Carapils / Dextrin": 0.2
+        },
+        "Luppoli": {
+            "Columbus (CTZ)": 250.0,
+            "Pacific Jade": 100.0,
+            "East Kent Goldings": 110.0,
+            "Styrian Goldings": 15.0,
+            "Centennial": 100.0,
+            "Cascade": 100.0,
+            "Mosaic": 120.0,
+            "El Dorado": 120.0
+        },
+        "Lieviti": {
+            "Safale US-05": 4.0,
+            "Safale S-04": 2.0
+        }
+    }
+}
