@@ -407,7 +407,7 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
     pdf.set_text_color(120, 120, 120)
     pdf.cell(0, 10, f"Sons of Brewery - Ricetta: {nome}", align='C')
 
-    # Ritorno binario per Streamlit
+    # --- RITORNO BINARIO SICURO PER STREAMLIT CLOUD (fpdf2) ---
     return bytes(pdf.output())
 
 # --- 5b. NUOVA FUNZIONE PDF ETICHETTE (MODIFICATA) ---
@@ -494,6 +494,7 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
         with pdf.rotation(90, x + w_et - s(1.5), y + s(55)):
             pdf.text(x + w_et - s(1.5), y + s(55), clean(f"Imbottigliata il {data_imb}"))
 
+    # --- RITORNO BINARIO SICURO PER STREAMLIT CLOUD (fpdf2) ---
     return bytes(pdf.output())
 
 # --- 6. SIDEBAR ---
