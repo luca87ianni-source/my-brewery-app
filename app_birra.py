@@ -408,7 +408,11 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
     pdf.cell(0, 10, f"Sons of Brewery - Ricetta: {nome}", align='C')
 
     # --- RITORNO BINARIO SICURO PER STREAMLIT CLOUD (fpdf2) ---
-    return bytes(pdf.output())
+    # Al posto di return bytes(pdf.output())
+    valore_pdf = pdf.output()
+    if isinstance(valore_pdf, (bytes, bytearray)):
+        return bytes(valore_pdf)
+    return valore_pdf
 
 # --- 5b. NUOVA FUNZIONE PDF ETICHETTE (MODIFICATA) ---
 def genera_pdf_etichette(nome, stile, abv, data_imb):
@@ -495,7 +499,11 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
             pdf.text(x + w_et - s(1.5), y + s(55), clean(f"Imbottigliata il {data_imb}"))
 
     # --- RITORNO BINARIO SICURO PER STREAMLIT CLOUD (fpdf2) ---
-    return bytes(pdf.output())
+    # Al posto di return bytes(pdf.output())
+    valore_pdf = pdf.output()
+    if isinstance(valore_pdf, (bytes, bytearray)):
+        return bytes(valore_pdf)
+    return valore_pdf
 
 # --- 6. SIDEBAR ---
 # Recuperiamo gli stili dal nuovo database JSON invece che dall'Excel
