@@ -1,4 +1,4 @@
 streamlit
 pandas
-fpdf
+fpdf==1.7.2
 google-generativeai

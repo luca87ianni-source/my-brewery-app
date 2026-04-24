@@ -394,7 +394,7 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
     sez("LIEVITO", [f"{lievito['nome']}" if lievito else "Nessuno"], 240, 240, 240)
     sez("MASH", [f"{s['temp']} C per {s['tempo']} min" for s in mash_steps], 210, 230, 250)
 
-    return bytes(pdf.output())
+    return pdf.output(dest="S").encode("latin-1")
 
 # --- 5b. NUOVA FUNZIONE PDF ETICHETTE (MODIFICATA) ---
 def genera_pdf_etichette(nome, stile, abv, data_imb):
@@ -475,7 +475,7 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
         with pdf.rotation(90, x + w_et - s(1.5), y + s(55)): # <--- Rotazione centrata a 36mm
             pdf.text(x + w_et - s(1.5), y + s(55), f"Imbottigliata il {data_imb}")
 
-    return bytes(pdf.output())
+    return pdf.output(dest="S").encode("latin-1")
 
 # --- 6. SIDEBAR ---
 # Recuperiamo gli stili dal nuovo database JSON invece che dall'Excel
