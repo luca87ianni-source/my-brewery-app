@@ -329,9 +329,11 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
     
     # --- REGISTRAZIONE FONT ---
     try:
+        # Aggiungi uni=True e assicurati che il nome file sia identico
         pdf.add_font('Freakshow', '', 'Carnevalee Freakshow.ttf', uni=True)
         font_titolo = 'Freakshow'
-    except:
+    except Exception as e:
+        # Se fallisce, usiamo Helvetica per non bloccare l'app
         font_titolo = 'Helvetica'
 
     def clean(t):
