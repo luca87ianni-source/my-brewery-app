@@ -7,23 +7,26 @@ from datetime import date
 from fpdf import FPDF 
 import google.generativeai as genai
 
-def clean(text):
-    """Pulisce il testo per evitare errori nel PDF"""
-    if text is None: return ""
-    return str(text).encode('latin-1', 'replace').decode('latin-1')
-
-
-
-# --- CARICAMENTO API KEY GEMINI ---
+# --- CARICAMENTO API KEY GEMINI (MODALITÀ SICURA) ---
 def get_api_key():
+    # 1. Prova a leggere dai Secrets di Streamlit (per il Cloud)
+    if "GOOGLE_API_KEY" in st.secrets:
+        return st.secrets["GOOGLE_API_KEY"]
+    
+    # 2. Backup per il locale: se hai ancora il file .txt lo legge, 
+    # altrimenti cerca nelle variabili d'ambiente
     if os.path.exists("key_gemini.txt"):
         with open("key_gemini.txt", "r") as f:
             return f.read().strip()
+            
     return None
 
 api_key = get_api_key()
+
 if api_key:
     genai.configure(api_key=api_key)
+else:
+    st.error("Chiave API non trovata! Configura i Secrets su Streamlit o il file key_gemini.txt in locale.")
 
 # --- 1. INIZIALIZZAZIONE SESSION STATE ---
 if 'pagina' not in st.session_state: st.session_state.pagina = "Home"
@@ -329,45 +332,38 @@ def scala_ingredienti(nuovi_litri, vecchi_litri, fermentabili, luppoli):
     for l in luppoli: l['grammi'] = round(l['grammi'] * ratio, 1)
     return fermentabili, luppoli
 
-# --- FUNZIONE DI SUPPORTO (Mettila prima delle altre) ---
-def clean(text):
-    """Pulisce il testo per evitare errori nel PDF"""
-    if text is None: return ""
-    return str(text).encode('latin-1', 'replace').decode('latin-1')
-
 # --- 5. FUNZIONE PDF SCHEDA ---
 def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, fermentabili, luppoli, lievito, mash_steps):
-    import os
-    from fpdf import FPDF
-    
-    # Gestione percorsi per Cloud
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    font_path = os.path.join(current_dir, "Carnevalee_Freakshow.ttf")
-    
     pdf = FPDF()
     pdf.add_page()
     
-    # Registrazione Font
-    if os.path.exists(font_path):
-        pdf.add_font("Carnivalee", "", font_path)
-        font_titolo = "Carnivalee"
-    else:
-        font_titolo = "Helvetica" # Fallback se il file manca
-        
-    # --- INTESTAZIONE ---
+    # --- REGISTRAZIONE FONT ---
+    try:
+        pdf.add_font('Freakshow', '', 'Carnevalee Freakshow.ttf', uni=True)
+        font_titolo = 'Freakshow'
+    except:
+        font_titolo = 'Helvetica'
+
+    def clean(t):
+        if not isinstance(t, str): t = str(t)
+        return t.replace("’", "'").replace("“", '"').replace("”", '"').encode('latin-1', 'replace').decode('latin-1')
+
+    # --- INTESTAZIONE NERO SU BIANCO ---
     pdf.set_text_color(0, 0, 0)
     pdf.set_font(font_titolo, '', 45) 
     pdf.cell(0, 25, clean(nome.upper()), ln=True, align='C')
     
+    # 2. STILE (Sempre nel tuo font, un po' più piccolo)
     pdf.set_font(font_titolo, '', 25) 
     testo_stile = f"Stile: {stile}" if stile else "Stile: Libero"
     pdf.cell(0, 15, clean(testo_stile), ln=True, align='C')
     
+    # Linea di separazione elegante
     pdf.set_draw_color(0, 0, 0)
     pdf.line(10, pdf.get_y() + 2, 200, pdf.get_y() + 2)
     pdf.ln(10)
 
-    # Parametri tecnici
+    # --- RIEPILOGO TECNICO ---
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(0, 8, " PARAMETRI TECNICI", ln=True, fill=True)
@@ -389,6 +385,7 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
     pdf.cell(64, 10, clean(f" Totale: {litri} L"), border=1, ln=True)
     pdf.ln(5)
 
+    # Sezioni Ingredienti
     def sez(t, d, r, g, b):
         pdf.set_fill_color(r, g, b)
         pdf.set_font("Helvetica", 'B', 11)
@@ -409,29 +406,29 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
 
     return bytes(pdf.output())
 
-# --- 5b. NUOVA FUNZIONE PDF ETICHETTE ---
+# --- 5b. NUOVA FUNZIONE PDF ETICHETTE (MODIFICATA) ---
 def genera_pdf_etichette(nome, stile, abv, data_imb):
-    import os
     from fpdf import FPDF
-
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    font_path = os.path.join(current_dir, "Carnevalee_Freakshow.ttf")
+    import os
 
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     
-    if os.path.exists(font_path):
-        pdf.add_font("Carnivalee", "", font_path)
+    if os.path.exists("Carnevalee Freakshow.ttf"):
+        pdf.add_font("Carnivalee", "", "Carnevalee Freakshow.ttf")
         font_main = "Carnivalee"
     else:
         font_main = "Helvetica"
     
+    # Parametri di scala
     BASE_W, BASE_H = 62, 85
-    w_et, h_et = 55, 73
+    w_et, h_et = 55, 73   # Dimensioni attuali
     scale = min(w_et / BASE_W, h_et / BASE_H)
 
-    def s(v): return v * scale
+    def s(v):
+        return v * scale
 
+    # Margini centrati
     m_x = (210 - (3 * w_et)) / 2
     m_y = (297 - (3 * h_et)) / 2
 
@@ -441,55 +438,52 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
         x = m_x + (col * w_et)
         y = m_y + (row * h_et)
 
+        # Bordo etichetta
         pdf.set_line_width(1.4)
         pdf.rect(x, y, w_et, h_et)
         pdf.set_line_width(0.2)
 
-        # Loghi (con percorso corretto)
-        for img_name in ["Logo Upper.png", "Logo Medium.png", "Pregnant.png"]:
-            img_path = os.path.join(current_dir, img_name)
-            if os.path.exists(img_path):
-                if img_name == "Logo Upper.png":
-                    pdf.image(img_path, x + s(4), y + s(3), w_et - s(8))
-                elif img_name == "Logo Medium.png":
-                    p_w = s(35)
-                    pdf.image(img_path, x + (w_et - p_w) / 2, y + s(14), p_w)
-                elif img_name == "Pregnant.png":
-                    pdf.image(img_path, x + s(2.5), y + s(64.5), s(6))
+        # 1. Logo Upper
+        if os.path.exists("Logo Upper.png"):
+            pdf.image("Logo Upper.png", x + s(4), y + s(3), w_et - s(8))
 
-        # Testi
-        pdf.set_font(font_main, "", max(1, int(20 * scale)))
-        pdf.set_xy(x, y + s(55))
-        pdf.cell(w_et, s(10), clean(nome.upper()), align='C')
+        # 2. Logo Medium (AUMENTATA DIMENSIONE p_w)
+        if os.path.exists("Logo Medium.png"):
+            p_w = s(35) # <--- Aumentato da 28 a 35
+            pdf.image("Logo Medium.png", x + (w_et - p_w) / 2, y + s(14), p_w)
 
+        # 3. EST 2021 (Commentato come da tua richiesta)
+        pdf.set_font("Times", 'B', max(1, int(7 * scale)))
+        pdf.set_xy(x, y + s(48))
+        # pdf.cell(w_et, s(5), "EST. 2021", align='C')
+
+        # 4. Nome birra (RIGA TITOLO - INGRANDITA)
+        pdf.set_font(font_main, "", max(1, int(20 * scale))) # <--- Aumentato da 16 a 20
+        pdf.set_xy(x, y + s(55)) # <--- Alzata la Y da 53 a 48 per dare spazio
+        pdf.cell(w_et, s(10), nome.upper(), align='C')
+
+        # --- 4. STILE (Allineato a sinistra) ---
         pdf.set_font(font_main, "", max(1, int(14 * scale)))
+        # Usiamo x + 2 per distanziarlo leggermente dal bordo nero
         pdf.set_xy(x + 2, y + s(75)) 
-        pdf.cell(s(30), s(10), clean(stile.upper()), align='L')
+        pdf.cell(s(30), s(10), stile.upper(), align='L')
 
+        # --- 5. ABV (Allineato a destra) ---
+        # Usiamo un font più grande come richiesto
         pdf.set_font(font_main, "", max(1, int(18 * scale)))
+        # Posizioniamo la cella in modo che finisca a 2mm dal bordo destro
         pdf.set_xy(x + w_et - s(15) - 2, y + s(75))
         pdf.cell(s(15), s(10), f"{abv:.1f}%", align='R')
 
-        # 7. Data imbottigliamento (Sintassi compatibile)
-        pdf.set_font("Times", "", max(1, int(7 * scale)))
-        
-        # Definiamo il punto di rotazione
-        rot_x = x + w_et - s(1.5)
-        rot_y = y + s(55)
-        
-        # Inizia rotazione
-        pdf.rotate(90, rot_x, rot_y)
-        
-        # Scrivi il testo
-        pdf.text(rot_x, rot_y, clean(f"Imbottigliata il {data_imb}"))
-        
-        # FERMA la rotazione (fondamentale, altrimenti gira tutto il resto!)
-        pdf.rotate(0)
 
-        
-        #pdf.set_font("Times", "", max(1, int(7 * scale)))
-        #with pdf.rotation(90, x + w_et - s(1.5), y + s(55)):
-            #pdf.text(x + w_et - s(1.5), y + s(55), clean(f"Imbottigliata il {data_imb}"))
+        # 6. Icona Pregnant (SPOSTATA PIU' IN ALTO)
+        if os.path.exists("Pregnant.png"):
+            pdf.image("Pregnant.png", x + s(2.5), y + s(64.5), s(6)) # <--- Spostato da 77.5 a 64.5
+
+        # 7. Data imbottigliamento (AUMENTATO FONT E CENTRATA)
+        pdf.set_font("Times", "", max(1, int(7 * scale))) # <--- Aumentato da 5.5 a 7
+        with pdf.rotation(90, x + w_et - s(1.5), y + s(55)): # <--- Rotazione centrata a 36mm
+            pdf.text(x + w_et - s(1.5), y + s(55), f"Imbottigliata il {data_imb}")
 
     return bytes(pdf.output())
 
