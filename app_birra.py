@@ -339,7 +339,7 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
     
     # --- REGISTRAZIONE FONT ---
     try:
-        pdf.add_font('Freakshow', '', 'Carnevalee Freakshow.ttf', uni=True)
+        pdf.add_font('Freakshow', '', 'Carnevalee_Freakshow.ttf', uni=True)
         font_titolo = 'Freakshow'
     except:
         font_titolo = 'Helvetica'
@@ -414,8 +414,8 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     
-    if os.path.exists("Carnevalee Freakshow.ttf"):
-        pdf.add_font("Carnivalee", "", "Carnevalee Freakshow.ttf")
+    if os.path.exists("Carnevalee_Freakshow.ttf"):
+        pdf.add_font("Carnivalee", "", "Carnevalee_Freakshow.ttf")
         font_main = "Carnivalee"
     else:
         font_main = "Helvetica"
