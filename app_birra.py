@@ -189,17 +189,22 @@ st.markdown("""
 
 # --- 4. FUNZIONI LOGICHE ---
 
-# Caricamento rapido dei DataFrame dai JSON per popolare i menu a tendina e le tabelle
 def inizializza_database():
     """Trasforma i file JSON in DataFrame all'avvio dell'app"""
-    # Carichiamo i dati dai JSON usando la funzione carica_db definita nella Sezione 2
-    df_f = pd.DataFrame(carica_db("malti")).T.reset_index().rename(columns={'index': 'Fermentabile'})
-    df_l = pd.DataFrame(carica_db("luppoli")).T.reset_index().rename(columns={'index': 'Luppolo'})
-    df_y = pd.DataFrame(carica_db("lieviti")).T.reset_index().rename(columns={'index': 'Lievito'})
-    df_s = pd.DataFrame(carica_db("stili")).T.reset_index().rename(columns={'index': 'Stile'})
+    def to_df(data, key_name):
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame.from_dict(data, orient='index')
+        df.index.name = key_name
+        return df.reset_index()
+
+    df_f = to_df(carica_db("malti"), "Fermentabile")
+    df_l = to_df(carica_db("luppoli"), "Luppolo")
+    df_y = to_df(carica_db("lieviti"), "Lievito")
+    df_s = to_df(carica_db("stili"), "Stile")
     return df_f, df_l, df_y, df_s
 
-# Creazione dei DataFrame globali (Sostituisce il vecchio carica_database Excel)
+# Creazione dei DataFrame globali
 df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
 
 def salva_su_file(nome, stile, data_imb, litri, fermentabili, luppoli, yeast, mash_steps, og_r, fg_r, abv_r):
@@ -508,7 +513,7 @@ with st.sidebar:
     if st.button("🤖 AIGOR", width="stretch"): 
         st.session_state.pagina = "AIGOR"; st.rerun()
     
-    # NUOVO PULSANTE DATABASE (Punto 2 del tuo piano)
+    # NUOVO PULSANTE DATABASE
     if st.button("⚙️ DATABASE", width="stretch"): 
         st.session_state.pagina = "Database"; st.rerun()
 
@@ -664,8 +669,8 @@ if st.session_state.pagina == "Magazzino":
         if not lieviti_da_comprare: st.info("Nessun lievito da acquistare.")
         if st.button("🗑️ SVUOTA LIEVITI", key="clear_c_y", use_container_width=True):
             mag["shopping_list"]["Lieviti"] = {}; salva_magazzino(mag); st.rerun()
-            
-# --- 8. PAGINA EDITOR (VERSIONE INTEGRALE E CORRETTA) ---
+
+# --- 8. PAGINA EDITOR ---
 elif st.session_state.pagina == "Editor":
     st.title(f"🛠️ Editor: {st.session_state.nome_b}")
     mag = carica_magazzino()
@@ -713,14 +718,12 @@ elif st.session_state.pagina == "Editor":
             "ebc": (float(s_info.get('EBC_min', 0)), float(s_info.get('EBC_max', 0))),
             "abv": (float(s_info.get('ABV_min', 0)), float(s_info.get('ABV_max', 0))),
         }
-        vol_default = float(s_info.get('Volumi', 2.3))
+        vol_default = float(s_info.get('Vol_CO2', s_info.get('Volumi', 2.3)))
     
-    # --- 2. RECUPERO VOLUMI CO2 (GESTIONE ERRORE KEYERROR) ---
-    vol_default = 2.3
+    # --- 2. RECUPERO VOLUMI CO2 ---
     if st.session_state.stile_b and not df_s_m.empty:
         s_info = df_s_m[df_s_m["Stile"] == st.session_state.stile_b]
         if not s_info.empty:
-            # Controlla se esiste Vol_CO2 o Volumi nel JSON
             colonne = s_info.columns
             colonna_target = "Vol_CO2" if "Vol_CO2" in colonne else ("Volumi" if "Volumi" in colonne else None)
             
@@ -731,7 +734,7 @@ elif st.session_state.pagina == "Editor":
                 except:
                     vol_default = 2.3
 
-    # --- 3. CALCOLO COSTI (PUNTANDO AL MAGAZZINO JSON) ---
+    # --- 3. CALCOLO COSTI ---
     costo_tot = 0.0
     for f in st.session_state.f_list:
         m_mag = mag["Fermentabili"].get(f['nome'], {})
@@ -782,7 +785,7 @@ elif st.session_state.pagina == "Editor":
         abv_reale_calc = (st.session_state.og_reale - st.session_state.fg_reale) * 131.25 + 0.5
         st.session_state.abv_reale = cr3.number_input("ABV % Finale (+0.5%)", value=float(abv_reale_calc), format="%.1f")
 
-    # TILE VERDE COSTI (Sotto le rilevazioni come nel tuo vecchio codice)
+    # TILE VERDE COSTI
     st.markdown(f"""<div class="calc-box" style="background-color: #28a745; color: white !important;"><div style="display:flex; justify-content:space-around; text-align:center;">
             <div><div class="metric-label" style="color:white !important;">Costo Totale Cotta</div><div class="metric-value" style="color:white !important;">{costo_tot:.2f} €</div></div>
             <div><div class="metric-label" style="color:white !important;">Costo al Litro</div><div class="metric-value" style="color:white !important;">{(costo_tot/st.session_state.litri_f if st.session_state.litri_f>0 else 0):.2f} €/L</div></div>
@@ -885,7 +888,6 @@ elif st.session_state.pagina == "Editor":
     st.divider()
     cd1, cd2 = st.columns(2)
     with cd1:
-        # Generiamo il PDF usando la nuova funzione (che deve essere definita prima nel codice)
         pdf_ricetta = genera_pdf_ricetta(
             st.session_state.nome_b, 
             st.session_state.stile_b, 
@@ -902,8 +904,6 @@ elif st.session_state.pagina == "Editor":
             st.session_state.yeast_sel, 
             st.session_state.m_list
         )
-        
-        # Bottone di download che punta ai dati appena generati
         st.download_button(
             label="📄 SCHEDA PDF", 
             data=pdf_ricetta, 
@@ -917,7 +917,6 @@ elif st.session_state.pagina == "Editor":
 
 # --- 10. PAGINA AGENTE AI (AIGOR) ---
 elif st.session_state.pagina == "AIGOR":   
-    # TITOLO CON NOME PERSONALIZZATO
     nome_agente = "AIgor" 
     
     st.markdown(f"""
@@ -958,7 +957,6 @@ elif st.session_state.pagina == "AIGOR":
 
     # --- LOGICA DI GENERAZIONE ---
     if st.button("🚀 GENERA STRATEGIA RICETTE", use_container_width=True):
-        # Costruiamo il contesto tecnico del magazzino leggendo dal JSON
         scorte_info = ""
         for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
             scorte_info += f"\n{cat.upper()}:\n"
@@ -1008,7 +1006,6 @@ elif st.session_state.pagina == "AIGOR":
         with st.chat_message("assistant"):
             with st.spinner("Ricalcolo in corso..."):
                 model = genai.GenerativeModel("gemini-2.5-flash")
-                # Forniamo il magazzino nel contesto per coerenza
                 context_with_query = f"Giacenze magazzino: {mag}. Conversazione precedente: {st.session_state.chat_history}. Richiesta utente: {prompt_utente}"
                 response = model.generate_content(context_with_query)
                 st.markdown(response.text)
@@ -1023,8 +1020,6 @@ elif st.session_state.pagina == "AIGOR":
 # --- 9. GESTIONE PAGINE FINALI (DATABASE & HOME) ---
 # ========================================================
 
-
-# --- PAGINA DATABASE (VERSIONE COMPLETA CON STILI) ---
 elif st.session_state.pagina == "Database":
     st.markdown("""
         <style>
@@ -1041,68 +1036,119 @@ elif st.session_state.pagina == "Database":
     
     tab_db1, tab_db2, tab_db3, tab_db4 = st.tabs(["🌾 Fermentabili", "🌿 Luppoli", "🧫 Lieviti", "🏆 Stili BJCP"])
 
-    # ... (Manteniamo i tab 1, 2 e 3 come prima) ...
-
+    # 1. TAB FERMENTABILI
     with tab_db1:
-        st.subheader("Aggiungi Malto")
+        st.subheader("Aggiungi / Modifica Malto")
         with st.form("form_malti"):
             nome_f = st.text_input("Nome Malto")
             c1, c2 = st.columns(2)
-            ppg_f = c1.number_input("PPG", value=36.0)
-            ebc_f = c2.number_input("EBC", value=10.0)
+            ppg_f = c1.number_input("PPG", value=36.0, step=0.1)
+            ebc_f = c2.number_input("EBC", value=10.0, step=0.1)
             if st.form_submit_button("REGISTRA MALTO"):
                 if nome_f:
-                    nuovo = pd.DataFrame([{"Fermentabile": nome_f, "PPG": ppg_f, "EBC": ebc_f}])
-                    df_f_m = pd.concat([df_f_m, nuovo], ignore_index=True).drop_duplicates(subset="Fermentabile")
-                    df_f_m.to_json("ingredienti_f.json", orient="records", indent=4)
-                    st.success(f"{nome_f} salvato!")
+                    db_malti = carica_db("malti")
+                    db_malti[nome_f] = {"PPG": ppg_f, "EBC": ebc_f}
+                    salva_db("malti", db_malti)
+                    df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
+                    st.success(f"Malto '{nome_f}' salvato in database_malti.json!")
                     st.rerun()
-        st.dataframe(df_f_m, use_container_width=True, hide_index=True)
+                else:
+                    st.error("Inserisci il nome del malto.")
+        
+        st.divider()
+        db_malti_curr = carica_db("malti")
+        if db_malti_curr:
+            df_m_show = pd.DataFrame.from_dict(db_malti_curr, orient='index').reset_index().rename(columns={'index': 'Fermentabile'})
+            st.dataframe(df_m_show, use_container_width=True, hide_index=True)
+            
+            c_del1, c_del2 = st.columns([3, 1])
+            m_del = c_del1.selectbox("Seleziona Malto da eliminare", options=[""] + sorted(list(db_malti_curr.keys())), key="del_m_db")
+            if c_del2.button("🗑️ ELIMINA MALTO") and m_del:
+                del db_malti_curr[m_del]
+                salva_db("malti", db_malti_curr)
+                df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
+                st.success(f"Malto '{m_del}' eliminato.")
+                st.rerun()
 
+    # 2. TAB LUPPOLI
     with tab_db2:
-        st.subheader("Aggiungi Luppolo")
+        st.subheader("Aggiungi / Modifica Luppolo")
         with st.form("form_luppoli"):
             nome_l = st.text_input("Nome Luppolo")
             c_l1, c_l2 = st.columns(2)
-            aa_l = c_l1.number_input("Alfa Acidi (%)", value=5.0)
+            aa_l = c_l1.number_input("Alfa Acidi (%)", value=5.0, step=0.1)
             tipo_l = c_l2.selectbox("Tipo Luppolo", ["Amaro", "Aroma", "Duale"])
             if st.form_submit_button("REGISTRA LUPPOLO"):
                 if nome_l:
-                    nuovo_l = pd.DataFrame([{"Luppolo": nome_l, "Alfa acidi (%)": aa_l, "Tipo": tipo_l}])
-                    df_l_m = pd.concat([df_l_m, nuovo_l], ignore_index=True).drop_duplicates(subset="Luppolo")
-                    df_l_m.to_json("ingredienti_l.json", orient="records", indent=4)
-                    st.success(f"{nome_l} salvato!")
+                    db_luppoli = carica_db("luppoli")
+                    db_luppoli[nome_l] = {"Alfa acidi (%)": aa_l, "Tipo": tipo_l}
+                    salva_db("luppoli", db_luppoli)
+                    df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
+                    st.success(f"Luppolo '{nome_l}' salvato in database_luppoli.json!")
                     st.rerun()
-        st.dataframe(df_l_m, use_container_width=True, hide_index=True)
+                else:
+                    st.error("Inserisci il nome del luppolo.")
+                    
+        st.divider()
+        db_luppoli_curr = carica_db("luppoli")
+        if db_luppoli_curr:
+            df_l_show = pd.DataFrame.from_dict(db_luppoli_curr, orient='index').reset_index().rename(columns={'index': 'Luppolo'})
+            st.dataframe(df_l_show, use_container_width=True, hide_index=True)
+            
+            c_del1, c_del2 = st.columns([3, 1])
+            l_del = c_del1.selectbox("Seleziona Luppolo da eliminare", options=[""] + sorted(list(db_luppoli_curr.keys())), key="del_l_db")
+            if c_del2.button("🗑️ ELIMINA LUPPOLO") and l_del:
+                del db_luppoli_curr[l_del]
+                salva_db("luppoli", db_luppoli_curr)
+                df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
+                st.success(f"Luppolo '{l_del}' eliminato.")
+                st.rerun()
 
+    # 3. TAB LIEVITI
     with tab_db3:
-        st.subheader("Aggiungi Lievito")
+        st.subheader("Aggiungi / Modifica Lievito")
         with st.form("form_lieviti"):
             nome_y = st.text_input("Nome Lievito")
-            att_y = st.number_input("Attenuazione (%)", value=75.0)
+            att_y = st.number_input("Attenuazione (%)", value=75.0, step=1.0)
             if st.form_submit_button("REGISTRA LIEVITO"):
                 if nome_y:
-                    nuovo_y = pd.DataFrame([{"Lievito": nome_y, "Attenuazione (%)": att_y}])
-                    df_y_m = pd.concat([df_y_m, nuovo_y], ignore_index=True).drop_duplicates(subset="Lievito")
-                    df_y_m.to_json("ingredienti_y.json", orient="records", indent=4)
-                    st.success(f"{nome_y} salvato!")
+                    db_lieviti = carica_db("lieviti")
+                    db_lieviti[nome_y] = {"Attenuazione (%)": att_y}
+                    salva_db("lieviti", db_lieviti)
+                    df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
+                    st.success(f"Lievito '{nome_y}' salvato in database_lieviti.json!")
                     st.rerun()
-        st.dataframe(df_y_m, use_container_width=True, hide_index=True)
+                else:
+                    st.error("Inserisci il nome del lievito.")
+                    
+        st.divider()
+        db_lieviti_curr = carica_db("lieviti")
+        if db_lieviti_curr:
+            df_y_show = pd.DataFrame.from_dict(db_lieviti_curr, orient='index').reset_index().rename(columns={'index': 'Lievito'})
+            st.dataframe(df_y_show, use_container_width=True, hide_index=True)
+            
+            c_del1, c_del2 = st.columns([3, 1])
+            y_del = c_del1.selectbox("Seleziona Lievito da eliminare", options=[""] + sorted(list(db_lieviti_curr.keys())), key="del_y_db")
+            if c_del2.button("🗑️ ELIMINA LIEVITO") and y_del:
+                del db_lieviti_curr[y_del]
+                salva_db("lieviti", db_lieviti_curr)
+                df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
+                st.success(f"Lievito '{y_del}' eliminato.")
+                st.rerun()
 
-    # --- VERSIONE DEFINITIVA E COMPLETA STILI BJCP ---
+    # 4. TAB STILI BJCP
     with tab_db4:
-        st.subheader("Aggiungi Stile BJCP")
+        st.subheader("Aggiungi / Modifica Stile BJCP")
         with st.form("form_stili"):
             nome_s = st.text_input("Nome Stile (es: American IPA)")
             
-            # 6 colonne per far stare tutto su una riga (OG, FG, IBU, EBC, ABV, VOL)
             c1, c2, c3, c4, c5, c6 = st.columns(6)
             
-            og_min = c1.number_input("OG Min", value=1.040, format="%.3f")
-            og_max = c1.number_input("OG Max", value=1.050, format="%.3f")
+            og_min = c1.number_input("OG Min", value=1.040, format="%.3f", step=0.001)
+            og_max = c1.number_input("OG Max", value=1.050, format="%.3f", step=0.001)
             
-            fg_min = c2.number_input("FG Min", value=1.008, format="%.3f")
-            fg_max = c2.number_input("FG Max", value=1.012, format="%.3f")
+            fg_min = c2.number_input("FG Min", value=1.008, format="%.3f", step=0.001)
+            fg_max = c2.number_input("FG Max", value=1.012, format="%.3f", step=0.001)
             
             ibu_min = c3.number_input("IBU Min", value=20.0, step=1.0)
             ibu_max = c3.number_input("IBU Max", value=40.0, step=1.0)
@@ -1113,42 +1159,52 @@ elif st.session_state.pagina == "Database":
             abv_min = c5.number_input("ABV Min %", value=4.5, step=0.1, format="%.1f")
             abv_max = c5.number_input("ABV Max %", value=6.0, step=0.1, format="%.1f")
 
-            # NUOVO: VOLUMI CO2 (Singolo valore di riferimento)
             vol_co2 = c6.number_input("Vol. CO2", value=2.4, step=0.1, format="%.1f")
             c6.caption("Target carbonazione")
             
             if st.form_submit_button("REGISTRA NUOVO STILE"):
                 if nome_s:
-                    nuovo_s = pd.DataFrame([{
-                        "Stile": nome_s,
+                    db_stili = carica_db("stili")
+                    db_stili[nome_s] = {
                         "OG_min": og_min, "OG_max": og_max,
                         "FG_min": fg_min, "FG_max": fg_max,
                         "IBU_min": ibu_min, "IBU_max": ibu_max,
                         "EBC_min": ebc_min, "EBC_max": ebc_max,
                         "ABV_min": abv_min, "ABV_max": abv_max,
-                        "Vol_CO2": vol_co2
-                    }])
-                    
-                    # Unione e salvataggio su JSON
-                    df_s_m = pd.concat([df_s_m, nuovo_s], ignore_index=True).drop_duplicates(subset="Stile")
-                    df_s_m.to_json("ingredienti_s.json", orient="records", indent=4)
-                    st.success(f"✅ Stile {nome_s} registrato con successo!")
+                        "Vol_CO2": vol_co2, "Volumi": vol_co2
+                    }
+                    salva_db("stili", db_stili)
+                    df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
+                    st.success(f"✅ Stile '{nome_s}' registrato con successo in database_stili.json!")
                     st.rerun()
+                else:
+                    st.error("Inserisci il nome dello stile.")
         
         st.divider()
-        st.dataframe(df_s_m.sort_values("Stile"), use_container_width=True, hide_index=True)
+        db_stili_curr = carica_db("stili")
+        if db_stili_curr:
+            df_s_show = pd.DataFrame.from_dict(db_stili_curr, orient='index').reset_index().rename(columns={'index': 'Stile'})
+            st.dataframe(df_s_show.sort_values("Stile"), use_container_width=True, hide_index=True)
+            
+            c_del1, c_del2 = st.columns([3, 1])
+            s_del = c_del1.selectbox("Seleziona Stile da eliminare", options=[""] + sorted(list(db_stili_curr.keys())), key="del_s_db")
+            if c_del2.button("🗑️ ELIMINA STILE") and s_del:
+                del db_stili_curr[s_del]
+                salva_db("stili", db_stili_curr)
+                df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
+                st.success(f"Stile '{s_del}' eliminato.")
+                st.rerun()
 
     if st.button("⬅️ TORNA ALLA HOME", use_container_width=True):
         st.session_state.pagina = "Home"
         st.rerun()
 
-# --- B. DASHBOARD (HOME) - DEVE ESSERE SEMPRE L'ULTIMA ---
+# --- DASHBOARD (HOME) ---
 else:
     st.title("🦅 Dashboard")
     mag = carica_magazzino()
     arch = carica_archivio()
     
-    # Calcolo metriche rapide dai dati JSON
     kg_malti = sum(float(i.get("qta", 0.0)) for i in mag["Fermentabili"].values())
     n_lupp = len(mag["Luppoli"])
     
@@ -1201,4 +1257,3 @@ else:
     if sh3.button("🤖 PARLA CON AIGOR", use_container_width=True): 
         st.session_state.pagina = "AIGOR"
         st.rerun()
-

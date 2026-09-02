@@ -2,3 +2,4 @@ streamlit
 pandas
 fpdf2>=2.7.4
 google-generativeai
+PyGithub
