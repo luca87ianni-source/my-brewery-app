@@ -5,7 +5,8 @@ import math
 import json
 from datetime import date
 from fpdf import FPDF 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # --- CARICAMENTO API KEY GEMINI (MODALITÀ SICURA) ---
 def get_api_key():
@@ -24,9 +25,10 @@ def get_api_key():
 api_key = get_api_key()
 
 if api_key:
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
     st.session_state["api_key_configured"] = True
 else:
+    client = None
     st.error("Chiave API non trovata! Configura i Secrets su Streamlit o il file key_gemini.txt in locale.")
 
 # --- 1. INIZIALIZZAZIONE SESSION STATE ---
@@ -801,463 +803,493 @@ elif st.session_state.pagina == "Editor":
         k_f = f2.number_input("Kg", min_value=0.0, step=0.1, key="qta_f_ed")
         if st.button("➕ Aggiungi Malto") and s_f and k_f > 0:
             d = df_f_m[df_f_m["Fermentabile"] == s_f].iloc[0]
-            st.session_state.f_list.append({'nome': s_f, 'kg': k_f, 'ppg': float(d['PPG']), 'ebc': float(d['EBC'])})
-            st.rerun()
-        for i, it in enumerate(st.session_state.f_list):
-            c = st.columns([0.9, 0.1]); c[0].markdown(f'<div class="ingrediente-box">{it["nome"]} - {it["kg"]:.2f}kg</div>', unsafe_allow_html=True)
-            if c[1].button("❌", key=f"del_f_{i}"): st.session_state.f_list.pop(i); st.rerun()
+            st.session_state.f_list.append({'nome': s_f, 'kg': k_f, 'ppg': float(d['PPG']), 'Ecco il codice sorgente Python per la tua applicazione Streamlit aggiornato con l'integrazione del nuovo SDK ufficiale `google-genai` (in sostituzione del pacchetto legacy `google-generativeai`).
 
-    with t2:
-        l1, l2, l3 = st.columns([2, 1, 1])
-        s_l = l1.selectbox("LUPPOLO", [""] + sorted(df_l_m["Luppolo"].tolist()), key="sel_l_ed")
-        g_l = l2.number_input("Grammi", step=1.0, key="qta_l_ed")
-        t_l = l3.selectbox("Modalità", ["Boil", "Hopstand", "Dry Hop"], key="mod_l_ed")
-        
-        c_val1, _ = st.columns(2)
-        val_p = 60
-        if t_l == "Boil": val_p = c_val1.number_input("Minuti", value=60, key="v_boil")
-        elif t_l == "Hopstand": val_p = c_val1.number_input("Temp °C", value=80, key="v_hop")
-        else: val_p = c_val1.number_input("Giorni", value=3, key="v_dry")
+### Modifiche Principali Applicate:
+1. **Importazione dell'SDK**: Utilizzo di `from google import genai` e `from google.genai import types`.
+2. **Inizializzazione del Client**: Utilizzo di `client = genai.Client(api_key=...)` in luogo della vecchia chiamata globale `genai.configure()`.
+3. **Chiamate di Generazione**: Migrazione a `client.models.generate_content(...)` specificando il modello `gemini-2.5-flash`.
 
-        if st.button("➕ Aggiungi Luppolo") and s_l and g_l > 0:
-            d = df_l_m[df_l_m["Luppolo"] == s_l].iloc[0]
-            st.session_state.l_list.append({'nome': s_l, 'grammi': g_l, 'tipo': t_l, 'valore_tempo': val_p, 'aa': float(d['Alfa acidi (%)'])})
-            st.rerun()
-        for i, it in enumerate(st.session_state.l_list):
-            c = st.columns([0.9, 0.1]); suf = "min" if it['tipo']=="Boil" else ("°C" if it['tipo']=="Hopstand" else "gg")
-            c[0].markdown(f'<div class="ingrediente-box"><b>{it["tipo"]}</b>: {it["nome"]} {it["grammi"]:.0f}g @ {it["valore_tempo"]}{suf}</div>', unsafe_allow_html=True)
-            if c[1].button("🗑️", key=f"del_l_{i}"): st.session_state.l_list.pop(i); st.rerun()
+```python
+import streamlit as st
+import pandas as pd
+import os
+import math
+import json
+from datetime import date
+from fpdf import FPDF 
+from google import genai
+from google.genai import types
 
-    with t3:
-        sel_y = st.selectbox("LIEVITO", [""] + sorted(df_y_m["Lievito"].tolist()))
-        if st.button("CONFERMA LIEVITO") and sel_y:
-            dy = df_y_m[df_y_m["Lievito"] == sel_y].iloc[0]
-            st.session_state.yeast_sel = {'nome': sel_y, 'attenuazione': float(dy['Attenuazione (%)'])}; st.rerun()
-        if st.session_state.yeast_sel: st.info(f"Selezionato: {st.session_state.yeast_sel['nome']}")
-
-    with t4:
-        m1, m2 = st.columns(2); tm, tmin = m1.number_input("Temp °C", value=65), m2.number_input("Minuti", value=60)
-        if st.button("➕ Step Mash"): st.session_state.m_list.append({'temp': tm, 'tempo': tmin}); st.rerun()
-        for i, s_mash in enumerate(st.session_state.m_list):
-            c = st.columns([0.9, 0.1]); c[0].markdown(f'<div class="ingrediente-box">{s_mash["temp"]}°C per {s_mash["tempo"]} min</div>', unsafe_allow_html=True)
-            if c[1].button("🗑️", key=f"del_m_{i}"): st.session_state.m_list.pop(i); st.rerun()
-
-    # --- 6. PRIMING E BOTTIGLIE ---
-    st.divider(); st.subheader("🍬 CALCOLO ZUCCHERO DI PRIMING")
-    col_p1, col_p2, col_p3 = st.columns(3)
-    v_co2 = col_p1.number_input("Vol CO2", value=vol_default, step=0.1)
-    t_fer = col_p2.number_input("Temp Max (°C)", value=20.0)
-    l_net = col_p3.number_input("Litri netti", value=float(st.session_state.litri_f - 2.0))
+# --- CARICAMENTO API KEY GEMINI (MODALITÀ SICURA) ---
+def get_api_key():
+    # 1. Prova a leggere dai Secrets di Streamlit (per il Cloud)
+    if "GOOGLE_API_KEY" in st.secrets:
+        return st.secrets["GOOGLE_API_KEY"]
     
-    zuc = max(0.0, (v_co2 - (1.57 * pow(0.982, t_fer))) * 4.0 * l_net)
-    
-    st.markdown(f"""<div class="calc-box" style="background-color: #4A90E2; color: white !important;"><div style="display:flex; justify-content:space-around; text-align:center;">
-            <div><div class="metric-label" style="color:white !important;">Zucchero Totale</div><div class="metric-value" style="color:white !important;">{zuc:.1f} g</div></div>
-            <div><div class="metric-label" style="color:white !important;">Gr/Litro</div><div class="metric-value" style="color:white !important;">{(zuc/l_net if l_net>0 else 0):.2f} g/L</div></div>
-        </div></div>""", unsafe_allow_html=True)
-
-    st.divider(); st.subheader("🍾 PIANIFICAZIONE IMBOTTIGLIAMENTO")
-    try:
-        b75, b66, b50, scolo = calcola_ripartizione_bottiglie(l_net)
-        q75, q66, q50 = b75 // 3, b66 // 3, b50 // 3
-        cb1, cb2, cb3, cb4 = st.columns(4)
-        cb1.metric("0.75 L", f"{b75}", delta=f"{q75} a testa")
-        cb2.metric("0.66 L", f"{b66}", delta=f"{q66} a testa")
-        cb3.metric("0.50 L", f"{b50}", delta=f"{q50} a testa")
-        cb4.metric("RESIDUO", f"{scolo:.2f} L")
-    except:
-        st.warning("Funzione calcolo bottiglie non caricata.")
-
-    # --- 7. PULSANTI AZIONE ---
-    st.divider(); col_salva, col_carrello, col_scarica = st.columns(3)
-    if col_salva.button("💾 SALVA IN ARCHIVIO", use_container_width=True):
-        salva_su_file(st.session_state.nome_b, st.session_state.stile_b, st.session_state.data_imb, st.session_state.litri_f, st.session_state.f_list, st.session_state.l_list, st.session_state.yeast_sel, st.session_state.m_list, st.session_state.og_reale, st.session_state.fg_reale, st.session_state.abv_reale)
-        st.toast("Salvata con successo!")
-    
-    if col_carrello.button("🛒 AGGIUNGI AL CARRELLO", use_container_width=True):
-        tutti = st.session_state.f_list + st.session_state.l_list
-        if st.session_state.yeast_sel: tutti.append({'nome': st.session_state.yeast_sel['nome'], 'lievito': True})
-        aggiungi_a_shopping_list(tutti); st.success("Aggiunti al carrello!")
-    
-    if col_scarica.button("🍺 SCARICA DAL MAGAZZINO", type="primary", use_container_width=True):
-        for f_item in st.session_state.f_list: aggiorna_scorta("Fermentabili", f_item['nome'], f_item['kg'], operazione="sub")
-        for l_item in st.session_state.l_list: aggiorna_scorta("Luppoli", l_item['nome'], l_item['grammi'], operazione="sub")
-        if st.session_state.yeast_sel: aggiorna_scorta("Lieviti", st.session_state.yeast_sel['nome'], 1, operazione="sub")
-        st.success("Magazzino aggiornato!")
-    
-    # PDF e Etichette
-    st.divider()
-    cd1, cd2 = st.columns(2)
-    with cd1:
-        pdf_ricetta = genera_pdf_ricetta(
-            st.session_state.nome_b, 
-            st.session_state.stile_b, 
-            st.session_state.litri_f, 
-            og, 
-            fg, 
-            abv, 
-            ibu, 
-            ebc, 
-            a_m, 
-            a_s, 
-            st.session_state.f_list, 
-            st.session_state.l_list, 
-            st.session_state.yeast_sel, 
-            st.session_state.m_list
-        )
-        st.download_button(
-            label="📄 SCHEDA PDF", 
-            data=pdf_ricetta, 
-            file_name=f"Scheda_{st.session_state.nome_b}.pdf", 
-            mime="application/pdf", 
-            use_container_width=True
-        )
-    with cd2:
-        pdf_etichette = genera_pdf_etichette(st.session_state.nome_b, st.session_state.stile_b, st.session_state.abv_reale, st.session_state.data_imb.strftime("%d/%m/%Y"))
-        st.download_button("🏷️ ETICHETTE PDF", data=pdf_etichette, file_name=f"Etichette_{st.session_state.nome_b}.pdf", mime="application/pdf", use_container_width=True)
-
-# --- 10. PAGINA AGENTE AI (AIGOR) ---
-elif st.session_state.pagina == "AIGOR":   
-    nome_agente = "AIgor" 
-    
-    st.markdown(f"""
-        <div style="text-align: center; padding: 10px; border-radius: 10px; background-color: #ffd700; margin-bottom: 20px;">
-            <h1 style="color: #000000; margin: 0; font-family: 'Carnivalee', sans-serif;">🤖 {nome_agente}</h1>
-            <p style="color: #000000; font-weight: bold; margin: 0;">L'INTELLIGENZA DEI SONS OF BREWERY</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    st.info(f"Ciao sono {nome_agente}. Fammi vedere cosa hai in magazzino e vediamo che birra possiamo tirar fuori.")
-    
-    if not api_key:
-        st.error("⚠️ Chiave API non trovata nel file key_gemini.txt o nei secrets. Controlla la configurazione!")
-        st.stop()
-
-    mag = carica_magazzino()
-
-    # --- PANNELLO DI CONTROLLO ---
-    with st.container(border=True):
-        st.subheader("🎯 Parametri di Ottimizzazione")
-        c1, c2 = st.columns(2)
-        
-        with c1:
-            direzioni = st.multiselect(
-                "Direzioni Aromatiche desiderate:",
-                options=["Luppolata/Tropicale", "Maltata/Dolce", "Tostata/Torrefatta", "Belga/Speziata", "Classica/Pilsner", "Strong/Alcolica"],
-                help="Scegliendo più direzioni, l'AI capirà se deve smistare gli ingredienti in più cotte separate."
-            )
-            solo_lievito = st.toggle("Usa solo lieviti in magazzino", value=True)
-        
-        with c2:
-            abv_range = st.select_slider(
-                "Range Alcolico desiderato (ABV %)",
-                options=[f"{x/10:.1f}" for x in range(30, 130, 5)],
-                value=("4.5", "7.5")
-            )
-            priorita = st.radio("Priorità:", ["Svuota più magazzino possibile", "Massima fedeltà allo stile"], horizontal=True)
-
-    # --- LOGICA DI GENERAZIONE ---
-    if st.button("🚀 GENERA STRATEGIA RICETTE", use_container_width=True):
-        scorte_info = ""
-        for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
-            scorte_info += f"\n{cat.upper()}:\n"
-            for n, d in mag.get(cat, {}).items():
-                u = "kg" if cat=="Fermentabili" else "g" if cat=="Luppoli" else "unità"
-                scorte_info += f"- {n}: {d['qta']} {u}\n"
-
-        prompt_sistema = f"""
-        Sei {nome_agente}, un homebrewer esperto dei Sons of Brewery. 
-        Sei competente ma alla mano: parli come uno che ha fatto tante cotte, senza fare il professore.
-
-        SCORTE ATTUALI: {scorte_info}
-        
-        PARAMETRI TECNICI:
-        - Direzioni: {', '.join(direzioni) if direzioni else 'Fai tu, basta che sia buona'}
-        - Vincolo Lievito: {solo_lievito} (Se non ne ha, digli chiaramente cosa comprare senza fare il professore)
-        - Range ABV: {abv_range[0]}% - {abv_range[1]}%
-        - Strategia: {priorita}
-        
-        REGOLE DI RISPOSTA (Sii conciso!):
-        1. Vai dritto al punto. Se il magazzino è vuoto, dillo senza giri di parole. 
-        2. Presenta la RICETTA COMPLETA (23L) in un unico blocco tecnico unificato.
-        3. Per ogni ingrediente scrivi chiaramente: "Nome | Totale | (Quantità dalle scorte + Quantità da comprare)".
-        4. Sezione "NOTE RAPIDE" solo per Mash, Luppolatura e Lievito.
-        5. Se proponi più cotte, separale con una linea netta.
-        6. Firma come un vero duro dei Sons.
-        """
-        
-        with st.spinner("Sto pensando..."):
-            try:
-                model = genai.GenerativeModel("gemini-2.5-flash")
-                response = model.generate_content(prompt_sistema)
-                st.session_state.chat_history = [{"role": "assistant", "content": response.text}]
-            except Exception as e:
-                st.error(f"Errore durante la generazione: {e}")
-
-    # --- INTERAZIONE E CHAT DI RIFINITURA ---
-    st.divider()
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    if prompt_utente := st.chat_input("Chiedi modifiche (es: 'Più amara', 'Cambia stile')"):
-        st.session_state.chat_history.append({"role": "user", "content": prompt_utente})
-        with st.chat_message("user"): st.markdown(prompt_utente)
-        
-        with st.chat_message("assistant"):
-            with st.spinner("Ricalcolo in corso..."):
-                try:
-                    model = genai.GenerativeModel("gemini-2.5-flash")
-                    context_with_query = f"Giacenze magazzino: {mag}. Conversazione precedente: {st.session_state.chat_history}. Richiesta utente: {prompt_utente}"
-                    response = model.generate_content(context_with_query)
-                    st.markdown(response.text)
-                    st.session_state.chat_history.append({"role": "assistant", "content": response.text})
-                except Exception as e:
-                    st.error(f"Errore durante la risposta: {e}")
-
-    if st.session_state.chat_history:
-        if st.button("🗑️ Reset Analisi"):
-            st.session_state.chat_history = []
-            st.rerun()
-
-# ========================================================
-# --- 9. GESTIONE PAGINE FINALI (DATABASE & HOME) ---
-# ========================================================
-
-elif st.session_state.pagina == "Database":
-    st.markdown("""
-        <style>
-        div[data-testid="stForm"] button {
-            background-color: #ffd700 !important;
-            color: #000000 !important;
-            border: 2px solid #000000 !important;
-            font-weight: bold !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.title("🗄️ Gestione Database")
-    
-    tab_db1, tab_db2, tab_db3, tab_db4 = st.tabs(["🌾 Fermentabili", "🌿 Luppoli", "🧫 Lieviti", "🏆 Stili BJCP"])
-
-    # 1. TAB FERMENTABILI
-    with tab_db1:
-        st.subheader("Aggiungi / Modifica Malto")
-        with st.form("form_malti"):
-            nome_f = st.text_input("Nome Malto")
-            c1, c2 = st.columns(2)
-            ppg_f = c1.number_input("PPG", value=36.0, step=0.1)
-            ebc_f = c2.number_input("EBC", value=10.0, step=0.1)
-            if st.form_submit_button("REGISTRA MALTO"):
-                if nome_f:
-                    db_malti = carica_db("malti")
-                    db_malti[nome_f] = {"PPG": ppg_f, "EBC": ebc_f}
-                    salva_db("malti", db_malti)
-                    df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
-                    st.success(f"Malto '{nome_f}' salvato in database_malti.json!")
-                    st.rerun()
-                else:
-                    st.error("Inserisci il nome del malto.")
-        
-        st.divider()
-        db_malti_curr = carica_db("malti")
-        if db_malti_curr:
-            df_m_show = pd.DataFrame.from_dict(db_malti_curr, orient='index').reset_index().rename(columns={'index': 'Fermentabile'})
-            st.dataframe(df_m_show, use_container_width=True, hide_index=True)
+    # 2. Backup per il locale: se hai ancora il file .txt lo legge, 
+    # altrimenti cerca nelle variabili d'ambiente
+    if os.path.exists("key_gemini.txt"):
+        with open("key_gemini.txt", "r") as f:
+            return f.read().strip()
             
-            c_del1, c_del2 = st.columns([3, 1])
-            m_del = c_del1.selectbox("Seleziona Malto da eliminare", options=[""] + sorted(list(db_malti_curr.keys())), key="del_m_db")
-            if c_del2.button("🗑️ ELIMINA MALTO") and m_del:
-                del db_malti_curr[m_del]
-                salva_db("malti", db_malti_curr)
-                df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
-                st.success(f"Malto '{m_del}' eliminato.")
-                st.rerun()
+    return os.environ.get("GOOGLE_API_KEY", None)
 
-    # 2. TAB LUPPOLI
-    with tab_db2:
-        st.subheader("Aggiungi / Modifica Luppolo")
-        with st.form("form_luppoli"):
-            nome_l = st.text_input("Nome Luppolo")
-            c_l1, c_l2 = st.columns(2)
-            aa_l = c_l1.number_input("Alfa Acidi (%)", value=5.0, step=0.1)
-            tipo_l = c_l2.selectbox("Tipo Luppolo", ["Amaro", "Aroma", "Duale"])
-            if st.form_submit_button("REGISTRA LUPPOLO"):
-                if nome_l:
-                    db_luppoli = carica_db("luppoli")
-                    db_luppoli[nome_l] = {"Alfa acidi (%)": aa_l, "Tipo": tipo_l}
-                    salva_db("luppoli", db_luppoli)
-                    df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
-                    st.success(f"Luppolo '{nome_l}' salvato in database_luppoli.json!")
-                    st.rerun()
-                else:
-                    st.error("Inserisci il nome del luppolo.")
-                    
-        st.divider()
-        db_luppoli_curr = carica_db("luppoli")
-        if db_luppoli_curr:
-            df_l_show = pd.DataFrame.from_dict(db_luppoli_curr, orient='index').reset_index().rename(columns={'index': 'Luppolo'})
-            st.dataframe(df_l_show, use_container_width=True, hide_index=True)
-            
-            c_del1, c_del2 = st.columns([3, 1])
-            l_del = c_del1.selectbox("Seleziona Luppolo da eliminare", options=[""] + sorted(list(db_luppoli_curr.keys())), key="del_l_db")
-            if c_del2.button("🗑️ ELIMINA LUPPOLO") and l_del:
-                del db_luppoli_curr[l_del]
-                salva_db("luppoli", db_luppoli_curr)
-                df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
-                st.success(f"Luppolo '{l_del}' eliminato.")
-                st.rerun()
+api_key = get_api_key()
 
-    # 3. TAB LIEVITI
-    with tab_db3:
-        st.subheader("Aggiungi / Modifica Lievito")
-        with st.form("form_lieviti"):
-            nome_y = st.text_input("Nome Lievito")
-            att_y = st.number_input("Attenuazione (%)", value=75.0, step=1.0)
-            if st.form_submit_button("REGISTRA LIEVITO"):
-                if nome_y:
-                    db_lieviti = carica_db("lieviti")
-                    db_lieviti[nome_y] = {"Attenuazione (%)": att_y}
-                    salva_db("lieviti", db_lieviti)
-                    df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
-                    st.success(f"Lievito '{nome_y}' salvato in database_lieviti.json!")
-                    st.rerun()
-                else:
-                    st.error("Inserisci il nome del lievito.")
-                    
-        st.divider()
-        db_lieviti_curr = carica_db("lieviti")
-        if db_lieviti_curr:
-            df_y_show = pd.DataFrame.from_dict(db_lieviti_curr, orient='index').reset_index().rename(columns={'index': 'Lievito'})
-            st.dataframe(df_y_show, use_container_width=True, hide_index=True)
-            
-            c_del1, c_del2 = st.columns([3, 1])
-            y_del = c_del1.selectbox("Seleziona Lievito da eliminare", options=[""] + sorted(list(db_lieviti_curr.keys())), key="del_y_db")
-            if c_del2.button("🗑️ ELIMINA LIEVITO") and y_del:
-                del db_lieviti_curr[y_del]
-                salva_db("lieviti", db_lieviti_curr)
-                df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
-                st.success(f"Lievito '{y_del}' eliminato.")
-                st.rerun()
-
-    # 4. TAB STILI BJCP
-    with tab_db4:
-        st.subheader("Aggiungi / Modifica Stile BJCP")
-        with st.form("form_stili"):
-            nome_s = st.text_input("Nome Stile (es: American IPA)")
-            
-            c1, c2, c3, c4, c5, c6 = st.columns(6)
-            
-            og_min = c1.number_input("OG Min", value=1.040, format="%.3f", step=0.001)
-            og_max = c1.number_input("OG Max", value=1.050, format="%.3f", step=0.001)
-            
-            fg_min = c2.number_input("FG Min", value=1.008, format="%.3f", step=0.001)
-            fg_max = c2.number_input("FG Max", value=1.012, format="%.3f", step=0.001)
-            
-            ibu_min = c3.number_input("IBU Min", value=20.0, step=1.0)
-            ibu_max = c3.number_input("IBU Max", value=40.0, step=1.0)
-            
-            ebc_min = c4.number_input("EBC Min", value=5.0, step=1.0)
-            ebc_max = c4.number_input("EBC Max", value=15.0, step=1.0)
-            
-            abv_min = c5.number_input("ABV Min %", value=4.5, step=0.1, format="%.1f")
-            abv_max = c5.number_input("ABV Max %", value=6.0, step=0.1, format="%.1f")
-
-            vol_co2 = c6.number_input("Vol. CO2", value=2.4, step=0.1, format="%.1f")
-            c6.caption("Target carbonazione")
-            
-            if st.form_submit_button("REGISTRA NUOVO STILE"):
-                if nome_s:
-                    db_stili = carica_db("stili")
-                    db_stili[nome_s] = {
-                        "OG_min": og_min, "OG_max": og_max,
-                        "FG_min": fg_min, "FG_max": fg_max,
-                        "IBU_min": ibu_min, "IBU_max": ibu_max,
-                        "EBC_min": ebc_min, "EBC_max": ebc_max,
-                        "ABV_min": abv_min, "ABV_max": abv_max,
-                        "Vol_CO2": vol_co2, "Volumi": vol_co2
-                    }
-                    salva_db("stili", db_stili)
-                    df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
-                    st.success(f"✅ Stile '{nome_s}' registrato con successo in database_stili.json!")
-                    st.rerun()
-                else:
-                    st.error("Inserisci il nome dello stile.")
-        
-        st.divider()
-        db_stili_curr = carica_db("stili")
-        if db_stili_curr:
-            df_s_show = pd.DataFrame.from_dict(db_stili_curr, orient='index').reset_index().rename(columns={'index': 'Stile'})
-            st.dataframe(df_s_show.sort_values("Stile"), use_container_width=True, hide_index=True)
-            
-            c_del1, c_del2 = st.columns([3, 1])
-            s_del = c_del1.selectbox("Seleziona Stile da eliminare", options=[""] + sorted(list(db_stili_curr.keys())), key="del_s_db")
-            if c_del2.button("🗑️ ELIMINA STILE") and s_del:
-                del db_stili_curr[s_del]
-                salva_db("stili", db_stili_curr)
-                df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
-                st.success(f"Stile '{s_del}' eliminato.")
-                st.rerun()
-
-    if st.button("⬅️ TORNA ALLA HOME", use_container_width=True):
-        st.session_state.pagina = "Home"
-        st.rerun()
-
-# --- DASHBOARD (HOME) ---
+if api_key:
+    client = genai.Client(api_key=api_key)
+    st.session_state["api_key_configured"] = True
 else:
-    st.title("🦅 Dashboard")
-    mag = carica_magazzino()
-    arch = carica_archivio()
-    
-    kg_malti = sum(float(i.get("qta", 0.0)) for i in mag["Fermentabili"].values())
-    n_lupp = len(mag["Luppoli"])
-    
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(f'<div class="calc-box"><div class="metric-label">Archivio</div><div class="metric-value">{len(arch)}</div></div>', unsafe_allow_html=True)
-    c2.markdown(f'<div class="calc-box"><div class="metric-label">Stock Malti</div><div class="metric-value">{kg_malti:.1f} Kg</div></div>', unsafe_allow_html=True)
-    c3.markdown(f'<div class="calc-box"><div class="metric-label">Tipologie Luppoli</div><div class="metric-value">{n_lupp}</div></div>', unsafe_allow_html=True)
+    client = None
+    st.error("Chiave API non trovata! Configura i Secrets su Streamlit o il file key_gemini.txt in locale.")
 
-    st.subheader("⚠️ Monitoraggio Scorte")
-    col_a1, col_a2 = st.columns(2)
+# --- 1. INIZIALIZZAZIONE SESSION STATE ---
+if 'pagina' not in st.session_state: st.session_state.pagina = "Home"
+if 'chat_history' not in st.session_state: st.session_state.chat_history = [] # Memoria Agente AI
+if 'nome_b' not in st.session_state: st.session_state.nome_b = "Nuova Ricetta"
+if 'stile_b' not in st.session_state: st.session_state.stile_b = ""
+if 'data_imb' not in st.session_state: st.session_state.data_imb = date.today()
+if 'litri_f' not in st.session_state: st.session_state.litri_f = 25.0
+if 'litri_precedenti' not in st.session_state: st.session_state.litri_precedenti = 25.0 # Per monitorare i cambi
+if 'f_list' not in st.session_state: st.session_state.f_list = []
+if 'l_list' not in st.session_state: st.session_state.l_list = []
+if 'm_list' not in st.session_state: st.session_state.m_list = []
+if 'yeast_sel' not in st.session_state: st.session_state.yeast_sel = None
+if 'og_reale' not in st.session_state: st.session_state.og_reale = 1.050
+if 'fg_reale' not in st.session_state: st.session_state.fg_reale = 1.010
+if 'abv_reale' not in st.session_state: st.session_state.abv_reale = 5.5
+
+# --- 2. GESTIONE DATI (Magazzino, Shopping List e Database Ingredienti) ---
+
+@st.cache_data
+def carica_db(tipo):
+    """Carica i database tecnici (Malti, Luppoli, ecc.) dai file JSON"""
+    files = {
+        "malti": "database_malti.json",
+        "luppoli": "database_luppoli.json",
+        "lieviti": "database_lieviti.json",
+        "stili": "database_stili.json",
+        "volumi": "database_volumi.json"
+    }
+    f_path = files.get(tipo)
+    if f_path and os.path.exists(f_path):
+        with open(f_path, "r", encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def salva_db(tipo, dati):
+    """Salva le modifiche ai database e pulisce la cache di Streamlit"""
+    files = {
+        "malti": "database_malti.json", 
+        "luppoli": "database_luppoli.json", 
+        "lieviti": "database_lieviti.json", 
+        "stili": "database_stili.json", 
+        "volumi": "database_volumi.json"
+    }
+    f_path = files.get(tipo)
+    if f_path:
+        with open(f_path, "w", encoding='utf-8') as f:
+            json.dump(dati, f, indent=4, ensure_ascii=False)
+        st.cache_data.clear() # Forza l'app a rileggere i dati aggiornati
+
+def carica_magazzino():
+    if os.path.exists("magazzino.json"):
+        with open("magazzino.json", "r", encoding='utf-8') as f: 
+            return json.load(f)
+    return {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {}}
+
+def salva_magazzino(data):
+    with open("magazzino.json", "w", encoding='utf-8') as f: 
+        json.dump(data, f, indent=4)
+
+def carica_archivio():
+    if os.path.exists("archivio_ricette.json"):
+        with open("archivio_ricette.json", "r", encoding='utf-8') as f: 
+            return json.load(f)
+    return {}
+
+def salva_archivio(dati):
+    with open("archivio_ricette.json", "w", encoding='utf-8') as f: 
+        json.dump(dati, f, indent=4)
+
+def genera_contesto_aigor(mag, archivio_json):
+    """Trasforma i dati del JSON in testo per l'IA"""
+    carrello = mag.get("shopping_list", {})
+    malti_c = ", ".join([f"{n} ({q}kg)" for n, q in carrello.get("Fermentabili", {}).items()])
+    luppoli_c = ", ".join([f"{n} ({q}g)" for n, q in carrello.get("Luppoli", {}).items()])
     
-    with col_a1:
-        st.markdown("#### 🌾 Alert Malti")
-        f_ok = True
-        for n, d in mag["Fermentabili"].items():
-            q = float(d.get("qta", 0.0))
-            n_up = n.upper()
-            soglia = 6.0 if ("PILSNER" in n_up or "PALE ALE" in n_up or "MARIS" in n_up) else 1.0
-            if q < soglia:
-                st.markdown(f'<div class="calc-box-alert">🚨 <b>{n}</b>: {q:.1f}kg</div>', unsafe_allow_html=True)
-                f_ok = False
-        if f_ok: st.success("Malti ok.")
+    ultime_ricette = "Nessuna"
+    if archivio_json:
+        nomi = list(archivio_json.keys())[-5:]
+        ultime_ricette = ", ".join(nomi)
+    
+    contesto = f"""
+    CONTESTO ATTUALE DI LUCA:
+    - NEL CARRELLO: Malti: [{malti_c}], Luppoli: [{luppoli_c}].
+    - ULTIME RICETTE PRODOTTE: {ultime_ricette}.
+    - REGOLE: Luppolo pacchetti 30g/100g/250g. Malti sacchi 1kg/5kg/25kg.
+    """
+    return contesto
+
+def aggiorna_scorta(categoria, nome, qta, prezzo=None, operazione="set"):
+    mag = carica_magazzino()
+    if nome not in mag[categoria]:
+        mag[categoria][nome] = {"qta": 0.0, "prezzo": 0.0}
+    attuale_qta = mag[categoria][nome].get("qta", 0.0)
+    if operazione == "add":
+        mag[categoria][nome]["qta"] = attuale_qta + qta
+    elif operazione == "sub":
+        mag[categoria][nome]["qta"] = max(0.0, attuale_qta - qta)
+    else:
+        mag[categoria][nome]["qta"] = qta
+    if prezzo is not None:
+        mag[categoria][nome]["prezzo"] = prezzo
+    salva_magazzino(mag)
+
+def aggiungi_a_shopping_list(ingredienti_ricetta):
+    mag = carica_magazzino()
+    if "shopping_list" not in mag or not isinstance(mag["shopping_list"].get("Fermentabili"), dict):
+        mag["shopping_list"] = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}
+    
+    for ing in ingredienti_ricetta:
+        nome = ing['nome']
+        qta_necessaria = ing.get('kg') or ing.get('grammi') or 1
+        cat = "Fermentabili" if 'kg' in ing else ("Luppoli" if 'grammi' in ing else "Lieviti")
+        attuale = mag["shopping_list"][cat].get(nome, 0.0)
+        mag["shopping_list"][cat][nome] = attuale + qta_necessaria
+                
+    salva_magazzino(mag)
+
+# --- 3. CONFIGURAZIONE E STILE CSS ---
+st.set_page_config(page_title="Sons of Brewery Master V7.1.5", layout="wide")
+
+st.markdown("""
+    <style>
+    .stApp { background-color: #1e2129; } 
+    [data-testid="stSidebar"] { background-color: #0b0d10 !important; border-right: 2px solid #FFD700; }
+    [data-testid="stWidgetLabel"] p { color: #FFD700 !important; font-weight: bold !important; background-color: transparent !important; }
+    .stTextInput input, .stNumberInput input, div[data-baseweb="select"] > div { background-color: #ffffff !important; color: #000000 !important; }
+    
+    /* SELETTORE BOTTONI GIALLI - FORZA TESTO NERO */
+    div.stButton > button, div.stButton > button p {
+        background-color: #FFD700 !important;
+        color: #000000 !important;
+        font-weight: 900 !important; /* Extra bold per massima leggibilità */
+    }
+
+    /* FIX SPECIFICO PER I BOTTONI STANDARD */
+    div.stButton > button {
+        border-radius: 5px !important;
+        border: 1px solid #000000 !important;
+    }
+
+    /* SELETTORE BOTTONI DOWNLOAD - TESTO BIANCO */
+    div.stDownloadButton > button, div.stDownloadButton > button p {
+        background-color: #4A90E2 !important;
+        color: #ffffff !important;
+        font-weight: bold !important;
+        border-radius: 5px !important;
+    }
+
+    .stMarkdown, p, h4 { color: #ffffff !important; }
+    h1, h2, h3 { color: #FFD700 !important; text-transform: uppercase; }
+    .calc-box { background-color: #FFD700; padding: 20px; border-radius: 12px; color: #000000 !important; margin-bottom: 25px; }
+    .calc-box-alert { background-color: #ff4b4b; padding: 15px; border-radius: 10px; color: white !important; margin-bottom: 10px; border: 1px solid white; }
+    .ingrediente-box { background-color: #2d313d; padding: 12px; border-radius: 8px; border-left: 5px solid #FFD700; margin-bottom: 10px; }
+    .metric-label { font-size: 0.9em; font-weight: bold; text-transform: uppercase; color: #000000 !important; }
+    .metric-value { font-size: 1.5em; font-weight: 900; color: #000000 !important; }
+    .color-swatch { width: 100%; height: 30px; border-radius: 5px; border: 2px solid #ffffff; margin-top: 5px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 4. FUNZIONI LOGICHE ---
+
+def inizializza_database():
+    """Trasforma i file JSON in DataFrame all'avvio dell'app"""
+    def to_df(data, key_name):
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame.from_dict(data, orient='index')
+        df.index.name = key_name
+        return df.reset_index()
+
+    df_f = to_df(carica_db("malti"), "Fermentabile")
+    df_l = to_df(carica_db("luppoli"), "Luppolo")
+    df_y = to_df(carica_db("lieviti"), "Lievito")
+    df_s = to_df(carica_db("stili"), "Stile")
+    return df_f, df_l, df_y, df_s
+
+# Creazione dei DataFrame globali
+df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
+
+def salva_su_file(nome, stile, data_imb, litri, fermentabili, luppoli, yeast, mash_steps, og_r, fg_r, abv_r):
+    """Salva la ricetta nell'archivio JSON"""
+    archivio = carica_archivio()
+    archivio[nome] = {
+        "stile": stile, 
+        "data_imbottigliamento": str(data_imb),
+        "litri": litri, 
+        "data": str(date.today()), 
+        "fermentabili": fermentabili, 
+        "luppoli": luppoli, 
+        "yeast": yeast, 
+        "mash_steps": mash_steps,
+        "og_reale": og_r,
+        "fg_reale": fg_r,
+        "abv_reale": abv_r
+    }
+    salva_archivio(archivio)
+
+def elimina_da_file(nome):
+    """Elimina una ricetta dall'archivio"""
+    archivio = carica_archivio()
+    if nome in archivio:
+        del archivio[nome]
+        salva_archivio(archivio)
+
+def calcola_ricetta_completa(litri_target, fermentabili, luppoli, lievito):
+    """Logica di calcolo dei parametri della birra (OG, FG, IBU, EBC)"""
+    EFF = 0.777; EVAP = 3.0; P_RAFF = 3.0; SM_MASH = 6.8; ASS_G = 0.96; R_MASH = 3.0
+    og, v_pre, a_m, a_s, tot_kg, tot_ibu, fg, abv, tot_ebc = 1.0, 0, 0, 0, 0, 0.0, 1.0, 0.0, 0.0
+    
+    if not fermentabili or litri_target <= 0: 
+        return og, v_pre, a_m, a_s, tot_kg, tot_ibu, fg, abv, tot_ebc
+        
+    tot_kg = sum(item['kg'] for item in fermentabili)
+    punti_potenziali = sum(item['kg'] * item['ppg'] * 8.345 for item in fermentabili)
+    og = 1 + ((punti_potenziali * EFF) / litri_target / 1000)
+    
+    galloni = litri_target * 0.264172
+    mcu = sum(((item['kg'] * 2.20462) * (item.get('ebc', 0) / 1.97)) / galloni for item in fermentabili)
+    if mcu > 0: 
+        tot_ebc = (1.4922 * (mcu ** 0.6859)) * 1.97
+        
+    if lievito:
+        att = lievito['attenuazione'] / 100 if lievito['attenuazione'] > 1 else lievito['attenuazione']
+        fg = 1 + ((og - 1) * (1 - att))
+        abv = (og - fg) * 131.25
+        
+    v_pre = litri_target + 2.0 + P_RAFF + EVAP
+    a_m = (tot_kg * R_MASH) + SM_MASH
+    a_s = (v_pre + (tot_kg * ASS_G)) - a_m
+    
+    boil_gravity = (og - 1) * (litri_target / v_pre) if v_pre > 0 else 0
+    f_gravity = 1.65 * (0.000125 ** boil_gravity)
+    
+    for l in luppoli:
+        if l['tipo'] == "Boil":
+            util = f_gravity * ((1 - math.exp(-0.04 * l['valore_tempo'])) / 4.15)
+            tot_ibu += ((l['grammi'] * (l['aa'] / 100) * 1000) * util) / litri_target
+        elif l['tipo'] == "Hopstand":
+            util = f_gravity * 0.03
+            tot_ibu += ((l['grammi'] * (l['aa'] / 100) * 1000) * util) / litri_target
             
-    with col_a2:
-        st.markdown("#### 🌿 Alert Luppoli")
-        l_ok = True
-        for n, d in mag["Luppoli"].items():
-            q = float(d.get("qta", 0.0))
-            if q < 30.0:
-                st.markdown(f'<div class="calc-box-alert">🚨 <b>{n}</b>: {q:.0f}g</div>', unsafe_allow_html=True)
-                l_ok = False
-        if l_ok: st.success("Luppoli ok.")
+    return og, v_pre, a_m, a_s, tot_kg, tot_ibu, fg, abv, tot_ebc
+
+def ebc_to_hex(ebc):
+    """Converte il valore EBC nel colore HEX corrispondente"""
+    if ebc <= 4: return "#F3F9BE"
+    elif ebc <= 8: return "#F6F510"
+    elif ebc <= 16: return "#E0D01B"
+    elif ebc <= 26: return "#CDAA37"
+    elif ebc <= 39: return "#BE8C3A"
+    elif ebc <= 59: return "#C17135"
+    elif ebc <= 100: return "#462215"
+    return "#080707"
+
+def check_range(valore, v_min, v_max):
+    """Confronto tra valore calcolato e range BJCP"""
+    try:
+        v_min, v_max = float(v_min), float(v_max)
+        if v_min == 0 and v_max == 0: return "⚪", "gray", "n.d."
+        if valore < v_min: return "⚠️", "#ff4b4b", f"Basso (min {v_min})"
+        elif valore > v_max: return "⚠️", "#ff4b4b", f"Alto (max {v_max})"
+        else: return "✅", "#28a745", "In stile"
+    except: return "⚪", "gray", "errore dati"
+
+def calcola_ripartizione_bottiglie(litri_netti):
+    vol_075 = 9 * 0.75
+    residuo = litri_netti - vol_075
+    bot_066, bot_050 = 0, 0
+    if residuo > 0:
+        coppie = int(residuo // 3.48)
+        bot_066, bot_050 = coppie * 3, coppie * 3
+        residuo -= (coppie * 3.48)
+        if residuo >= 1.98: bot_066 += 3; residuo -= 1.98
+        elif residuo >= 1.50: bot_050 += 3; residuo -= 1.50
+    return 9, bot_066, bot_050, max(0.0, residuo)
+
+def ottimizza_pacchetti_malto(kg_necessari):
+    if kg_necessari <= 0: return {}
+    n25 = int(kg_necessari // 25); resto = kg_necessari % 25
+    n5 = int(resto // 5); resto = resto % 5
+    n1 = int(math.ceil(resto))
+    res = {}
+    if n25 > 0: res["Sacco 25kg"] = n25
+    if n5 > 0: res["Sacco 5kg"] = n5
+    if n1 > 0: res["Sacco 1kg"] = n1
+    return res
+
+def ottimizza_pacchetti_luppolo(g_necessari):
+    if g_necessari <= 0: return {}
+    n250 = int(g_necessari // 250); resto = g_necessari % 250
+    if resto > 180: n250 += 1; resto = 0
+    n100 = int(resto // 100); resto = resto % 100
+    if resto > 70: n100 += 1; resto = 0
+    n30 = int(math.ceil(resto / 30))
+    res = {}
+    if n250 > 0: res["Busta 250g"] = n250
+    if n100 > 0: res["Busta 100g"] = n100
+    if n30 > 0: res["Busta 30g"] = n30
+    return res
+
+def scala_ingredienti(nuovi_litri, vecchi_litri, fermentabili, luppoli):
+    """Riscala le quantità in base ai nuovi litri target"""
+    if vecchi_litri <= 0 or nuovi_litri == vecchi_litri:
+        return fermentabili, luppoli
+    ratio = nuovi_litri / vecchi_litri
+    for f in fermentabili: f['kg'] = round(f['kg'] * ratio, 2)
+    for l in luppoli: l['grammi'] = round(l['grammi'] * ratio, 1)
+    return fermentabili, luppoli
+
+# --- 5. FUNZIONE PDF SCHEDA ---
+def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, fermentabili, luppoli, lievito, mash_steps):
+    pdf = FPDF()
+    pdf.add_page()
     
-    st.divider()
-    sh1, sh2, sh3 = st.columns(3) 
+    # --- REGISTRAZIONE FONT ---
+    try:
+        pdf.add_font('Freakshow', '', 'Carnevalee_Freakshow.ttf', uni=True)
+        font_titolo = 'Freakshow'
+    except:
+        font_titolo = 'Helvetica'
+
+    def clean(t):
+        if not isinstance(t, str): t = str(t)
+        return t.replace("’", "'").replace("“", '"').replace("”", '"').encode('latin-1', 'replace').decode('latin-1')
+
+    # --- INTESTAZIONE NERO SU BIANCO ---
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font(font_titolo, '', 45) 
+    pdf.cell(0, 25, clean(nome.upper()), ln=True, align='C')
     
-    if sh1.button("➕ NUOVA RICETTA", use_container_width=True):
-        st.session_state.nome_b = "Nuova Ricetta"
-        st.session_state.stile_b = ""
-        st.session_state.f_list, st.session_state.l_list, st.session_state.m_list = [], [], []
-        st.session_state.yeast_sel = None
-        st.session_state.og_reale, st.session_state.fg_reale = 1.050, 1.010
-        st.session_state.pagina = "Editor"
-        st.rerun()
-        
-    if sh2.button("📦 VAI AL MAGAZZINO", use_container_width=True): 
-        st.session_state.pagina = "Magazzino"
-        st.rerun()
-        
-    if sh3.button("🤖 PARLA CON AIGOR", use_container_width=True): 
-        st.session_state.pagina = "AIGOR"
-        st.rerun()
+    # 2. STILE (Sempre nel tuo font, un po' più piccolo)
+    pdf.set_font(font_titolo, '', 25) 
+    testo_stile = f"Stile: {stile}" if stile else "Stile: Libero"
+    pdf.cell(0, 15, clean(testo_stile), ln=True, align='C')
+    
+    # Linea di separazione elegante
+    pdf.set_draw_color(0, 0, 0)
+    pdf.line(10, pdf.get_y() + 2, 200, pdf.get_y() + 2)
+    pdf.ln(10)
+
+    # --- RIEPILOGO TECNICO ---
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(0, 8, " PARAMETRI TECNICI", ln=True, fill=True)
+    
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(38, 10, clean(f" OG: {og:.3f}"), border='LTB')
+    pdf.cell(38, 10, clean(f" FG: {fg:.3f}"), border='TB')
+    pdf.cell(38, 10, clean(f" ABV: {abv:.1f}%"), border='TB')
+    pdf.cell(38, 10, clean(f" IBU: {ibu:.1f}"), border='TB')
+    pdf.cell(38, 10, clean(f" EBC: {ebc:.1f}"), border='RTB', ln=True)
+    pdf.ln(5)
+
+    # Volumi Acqua
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(0, 8, " VOLUMI ACQUA", ln=True, fill=True)
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(63, 10, clean(f" Mash: {a_m:.1f} L"), border=1)
+    pdf.cell(63, 10, clean(f" Sparge: {a_s:.1f} L"), border=1)
+    pdf.cell(64, 10, clean(f" Totale: {litri} L"), border=1, ln=True)
+    pdf.ln(5)
+
+    # Sezioni Ingredienti
+    def sez(t, d, r, g, b):
+        pdf.set_fill_color(r, g, b)
+        pdf.set_font("Helvetica", 'B', 11)
+        pdf.cell(0, 8, f" {t}", ln=True, fill=True)
+        pdf.ln(2)
+        pdf.set_font("Helvetica", '', 10)
+        if d:
+            for item in d:
+                pdf.cell(0, 7, clean(f"  > {item}"), ln=True)
+        else:
+            pdf.cell(0, 7, "  - Nessun dato", ln=True)
+        pdf.ln(3)
+
+    sez("MALTI E FERMENTABILI", [f"{f['nome']}: {f['kg']} kg" for f in fermentabili], 255, 245, 200)
+    sez("LUPPOLI", [f"{l['tipo']}: {l['nome']} {l['grammi']}g ({l['valore_tempo']} min/gg)" for l in luppoli], 220, 240, 220)
+    sez("LIEVITO", [f"{lievito['nome']}" if lievito else "Nessuno"], 240, 240, 240)
+    sez("MASH", [f"{s['temp']} C per {s['tempo']} min" for s in mash_steps], 210, 230, 250)
+
+    return bytes(pdf.output())
+
+# --- 5b. NUOVA FUNZIONE PDF ETICHETTE (MODIFICATA) ---
+def genera_pdf_etichette(nome, stile, abv, data_imb):
+    from fpdf import FPDF
+    import os
+
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.add_page()
+    
+    if os.path.exists("Carnevalee_Freakshow.ttf"):
+        pdf.add_font("Carnivalee", "", "Carnevalee_Freakshow.ttf")
+        font_main = "Carnivalee"
+    else:
+        font_main = "Helvetica"
+    
+    # Parametri di scala
+    BASE_W, BASE_H = 62, 85
+    w_et, h_et = 55, 73   # Dimensioni attuali
+    scale = min(w_et / BASE_W, h_et / BASE_H)
+
+    def s(v):
+        return v * scale
+
+    # Margini centrati
+    m_x = (210 - (3 * w_et)) / 2
+    m_y = (297 - (3 * h_et)) / 2
+
+    for i in range(9):
+        col = i % 3
+        row = i // 3
+        x = m_x + (col * w_et)
+        y = m_y + (row * h_et)
+
+        # Bordo etichetta
+        pdf.set_line_width(1.4)
+        pdf.rect(x, y, w_et, h_et)
+        pdf.set_line_width(0.2)
+
+        # 1. Logo Upper
+        if os.path.exists("Logo Upper.png"):
+            pdf.image("Logo Upper.png", x + s(4), y + s(3), w_et - s(8))
+
+        # 2. Logo Medium (AUMENTATA DIMENSIONE p_w)
+        if os.path.exists("Logo Medium.png"):
+            p_w = s(35) # <--- Aumentato da 28 a 35
+            pdf.image("Logo Medium.png", x + (w_et - p_w) / 2, y + s(14), p_w)
+
+        # 3. EST 2021 (Commentato come da tua richiesta)
+        pdf.set_font("Times", 'B', max(1, int(7 * scale)))
+        pdf.set_xy(x, y + s(48))
+        # pdf.cell(w_et, s(5), "EST. 2021", align='C')
+
+        # 4. Nome birra (RIGA TITOLO - INGRANDITA)
+        pdf.set_font(font_main, "", max(1, int(20 * scale))) # <--- Aumentato da 16 a 20
+        pdf.set_xy(x, y + s(55)) # <--- Alzata la Y da 53 a 48 per dare spazio
+        pdf.cell(w_et, s(10), nome.upper(), align='C')
+
+        # --- 4. STILE (Allineato a sinistra) ---
+        pdf.set_font(font_main, "", max(1, int(14 * scale)))
+        # Usiamo x + 2 per distanziarlo leggermente dal bordo nero
+        pdf.set_xy(x + 2, y + s(75)) 
+        pdf.cell(s(30), s(10), stile.upper(), align='L')
+
+        # --- 5. ABV (Allineato a destra) ---
+        # Usiamo un font più grande come richiesto
+        pdf.set_font(font_main, "", max(1, int(18 * scale)))
+        # Posizioniamo la cella in modo che finisca a
