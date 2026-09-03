@@ -806,9 +806,9 @@ elif st.session_state.pagina == "Editor":
             st.session_state.f_list.append({'nome': s_f, 'kg': k_f, 'ppg': float(d['PPG']), 'Ecco il codice sorgente Python per la tua applicazione Streamlit aggiornato con l'integrazione del nuovo SDK ufficiale `google-genai` (in sostituzione del pacchetto legacy `google-generativeai`).
 
 ### Modifiche Principali Applicate:
-1. **Importazione dell'SDK**: Utilizzo di `from google import genai` e `from google.genai import types`.
-2. **Inizializzazione del Client**: Utilizzo di `client = genai.Client(api_key=...)` in luogo della vecchia chiamata globale `genai.configure()`.
-3. **Chiamate di Generazione**: Migrazione a `client.models.generate_content(...)` specificando il modello `gemini-2.5-flash`.
+### 1. **Importazione dell'SDK**: Utilizzo di `from google import genai` e `from google.genai import types`.
+### 2. **Inizializzazione del Client**: Utilizzo di `client = genai.Client(api_key=...)` in luogo della vecchia chiamata globale `genai.configure()`.
+### 3. **Chiamate di Generazione**: Migrazione a `client.models.generate_content(...)` specificando il modello `gemini-2.5-flash`.
 
 ```python
 import streamlit as st
