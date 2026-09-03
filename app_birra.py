@@ -795,15 +795,23 @@ elif st.session_state.pagina == "Editor":
         </div></div>""", unsafe_allow_html=True)
 
     # --- 5. TABS INGREDIENTI ---
-    t1, t2, t3, t4 = st.tabs(["🌾 FERMENTABILI", "🌿 LUPPOLI", "🧫 LIEVITO", "🌡️ MASH"])
+t1, t2, t3, t4 = st.tabs(["🌾 FERMENTABILI", "🌿 LUPPOLI", "🧫 LIEVITO", "🌡️ MASH"])
+
+with t1:
+    f1, f2 = st.columns([3, 1])
+    s_f = f1.selectbox("MALTO", [""] + sorted(df_f_m["Fermentabile"].tolist()), key="sel_f_ed")
+    k_f = f2.number_input("Kg", min_value=0.0, step=0.1, key="qta_f_ed")
     
-    with t1:
-        f1, f2 = st.columns([3, 1])
-        s_f = f1.selectbox("MALTO", [""] + sorted(df_f_m["Fermentabile"].tolist()), key="sel_f_ed")
-        k_f = f2.number_input("Kg", min_value=0.0, step=0.1, key="qta_f_ed")
-        if st.button("➕ Aggiungi Malto") and s_f and k_f > 0:
-            d = df_f_m[df_f_m["Fermentabile"] == s_f].iloc[0]
-            st.session_state.f_list.append({'nome': s_f, 'kg': k_f, 'ppg': float(d['PPG']), 'Ecco il codice sorgente Python per la tua applicazione Streamlit aggiornato con l'integrazione del nuovo SDK ufficiale `google-genai` (in sostituzione del pacchetto legacy `google-generativeai`).
+    if st.button("➕ Aggiungi Malto") and s_f and k_f > 0:
+        d = df_f_m[df_f_m["Fermentabile"] == s_f].iloc[0]
+        # ✅ CORRETTO: chiusura pulita del dizionario e dell'append
+        st.session_state.f_list.append({
+            'nome': s_f, 
+            'kg': k_f, 
+            'ppg': float(d['PPG']),
+            'ebc': float(d['EBC'])  # o eventuali altri campi del malto
+        })
+        st.rerun()
 
 ### Modifiche Principali Applicate:
 ### 1. **Importazione dell'SDK**: Utilizzo di `from google import genai` e `from google.genai import types`.
