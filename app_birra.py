@@ -19,12 +19,13 @@ def get_api_key():
         with open("key_gemini.txt", "r") as f:
             return f.read().strip()
             
-    return None
+    return os.environ.get("GOOGLE_API_KEY", None)
 
 api_key = get_api_key()
 
 if api_key:
     genai.configure(api_key=api_key)
+    st.session_state["api_key_configured"] = True
 else:
     st.error("Chiave API non trovata! Configura i Secrets su Streamlit o il file key_gemini.txt in locale.")
 
@@ -929,7 +930,7 @@ elif st.session_state.pagina == "AIGOR":
     st.info(f"Ciao sono {nome_agente}. Fammi vedere cosa hai in magazzino e vediamo che birra possiamo tirar fuori.")
     
     if not api_key:
-        st.error("⚠️ Chiave API non trovata nel file key_gemini.txt. Controlla il file!")
+        st.error("⚠️ Chiave API non trovata nel file key_gemini.txt o nei secrets. Controlla la configurazione!")
         st.stop()
 
     mag = carica_magazzino()
@@ -991,7 +992,7 @@ elif st.session_state.pagina == "AIGOR":
                 response = model.generate_content(prompt_sistema)
                 st.session_state.chat_history = [{"role": "assistant", "content": response.text}]
             except Exception as e:
-                st.error(f"Errore: {e}")
+                st.error(f"Errore durante la generazione: {e}")
 
     # --- INTERAZIONE E CHAT DI RIFINITURA ---
     st.divider()
@@ -1005,11 +1006,14 @@ elif st.session_state.pagina == "AIGOR":
         
         with st.chat_message("assistant"):
             with st.spinner("Ricalcolo in corso..."):
-                model = genai.GenerativeModel("gemini-2.5-flash")
-                context_with_query = f"Giacenze magazzino: {mag}. Conversazione precedente: {st.session_state.chat_history}. Richiesta utente: {prompt_utente}"
-                response = model.generate_content(context_with_query)
-                st.markdown(response.text)
-                st.session_state.chat_history.append({"role": "assistant", "content": response.text})
+                try:
+                    model = genai.GenerativeModel("gemini-2.5-flash")
+                    context_with_query = f"Giacenze magazzino: {mag}. Conversazione precedente: {st.session_state.chat_history}. Richiesta utente: {prompt_utente}"
+                    response = model.generate_content(context_with_query)
+                    st.markdown(response.text)
+                    st.session_state.chat_history.append({"role": "assistant", "content": response.text})
+                except Exception as e:
+                    st.error(f"Errore durante la risposta: {e}")
 
     if st.session_state.chat_history:
         if st.button("🗑️ Reset Analisi"):
