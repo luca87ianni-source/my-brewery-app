@@ -2,3 +2,5 @@ streamlit
 pandas
 fpdf2>=2.7.4
 st-gsheets-connection
+google-genai
+PyGithub
