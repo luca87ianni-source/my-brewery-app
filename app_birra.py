@@ -5,7 +5,7 @@ import math
 import ast
 import json
 from datetime import date
-from fpdf import FPDF 
+from fpdf import FPDF
 import google.generativeai as genai
 from streamlit_gsheets import GSheetsConnection
 
