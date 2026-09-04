@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import math
 import ast
+import json
 from datetime import date
 from fpdf import FPDF 
 import google.generativeai as genai
@@ -95,50 +96,89 @@ df_l_m = leggi_foglio("Database_Luppoli")
 df_y_m = leggi_foglio("Database_Lieviti")
 df_s_m = leggi_foglio("Database_Stili")
 
-# --- 3. FUNZIONI OPERATIVE MAGAZZINO E ARCHIVIO GSHEETS ---
-def carica_magazzino_dict():
-    df_mag = leggi_foglio("Magazzino")
-    mag = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}}
-    if not df_mag.empty:
-        for _, row in df_mag.iterrows():
-            cat = str(row.get("Categoria", "")).strip()
-            nome = str(row.get("Nome", "")).strip()
-            qta = float(row.get("Quantita", 0.0))
-            prezzo = float(row.get("Prezzo", 0.0))
-            is_shop = bool(row.get("InShoppingList", False))
-            
-            if cat in ["Fermentabili", "Luppoli", "Lieviti"]:
-                if is_shop:
-                    mag["shopping_list"][cat][nome] = qta
-                else:
-                    mag[cat][nome] = {"qta": qta, "prezzo": prezzo}
-    return mag
+# --- MAPPA FILE JSON (Aggiornata con le versioni _2.json) ---
+DB_FILES = {
+    "malti": "database_malti_2.json",
+    "luppoli": "database_luppoli_2.json",
+    "lieviti": "database_lieviti_2.json",
+    "stili": "database_stili_2.json",
+    "volumi": "database_volumi_2.json"
+}
 
-def salva_magazzino_dict(mag):
-    rows = []
-    for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
-        for nome, item in mag.get(cat, {}).items():
-            rows.append({
-                "Categoria": cat,
-                "Nome": nome,
-                "Quantita": item.get("qta", 0.0),
-                "Prezzo": item.get("prezzo", 0.0),
-                "InShoppingList": False
-            })
-        for nome, qta in mag.get("shopping_list", {}).get(cat, {}).items():
-            rows.append({
-                "Categoria": cat,
-                "Nome": nome,
-                "Quantita": qta,
-                "Prezzo": 0.0,
-                "InShoppingList": True
-            })
-    salva_foglio("Magazzino", pd.DataFrame(rows))
+@st.cache_data
+def carica_db(tipo):
+    """Carica i database tecnici (Malti, Luppoli, ecc.) dai file JSON"""
+    f_path = DB_FILES.get(tipo)
+    if f_path and os.path.exists(f_path):
+        with open(f_path, "r", encoding='utf-8') as f:
+            dati = json.load(f)
+            # Gestione specifica per i volumi CO2: converte le chiavi di temperatura in int
+            if tipo == "volumi":
+                return {int(k): v.get("Volumi") if isinstance(v, dict) else v for k, v in dati.items()}
+            return dati
+    return {}
+
+def salva_db(tipo, dati):
+    """Salva le modifiche ai database JSON e pulisce la cache di Streamlit"""
+    f_path = DB_FILES.get(tipo)
+    if f_path:
+        with open(f_path, "w", encoding='utf-8') as f:
+            json.dump(dati, f, indent=4, ensure_ascii=False)
+        st.cache_data.clear()
+
+# --- CARICAMENTO DIRETTO IN MEMORIA (Sostituisce leggi_foglio) ---
+db_malti = carica_db("malti")
+db_luppoli = carica_db("luppoli")
+db_lieviti = carica_db("lieviti")
+db_stili = carica_db("stili")
+db_volumi = carica_db("volumi")
+
+# --- GESTIONE MAGAZZINO E ARCHIVIO (JSON Locali) ---
+def carica_magazzino():
+    if os.path.exists("magazzino.json"):
+        with open("magazzino.json", "r", encoding='utf-8') as f: 
+            return json.load(f)
+    return {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {}}
+
+def salva_magazzino(data):
+    with open("magazzino.json", "w", encoding='utf-8') as f: 
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+def carica_archivio():
+    if os.path.exists("archivio_ricette.json"):
+        with open("archivio_ricette.json", "r", encoding='utf-8') as f: 
+            return json.load(f)
+    return {}
+
+def salva_archivio(dati):
+    with open("archivio_ricette.json", "w", encoding='utf-8') as f: 
+        json.dump(dati, f, indent=4, ensure_ascii=False)
+
+def genera_contesto_aigor(mag, archivio_json):
+    """Trasforma i dati del magazzino e archivio in contesto testuale per l'IA"""
+    carrello = mag.get("shopping_list", {})
+    malti_c = ", ".join([f"{n} ({q}kg)" for n, q in carrello.get("Fermentabili", {}).items()])
+    luppoli_c = ", ".join([f"{n} ({q}g)" for n, q in carrello.get("Luppoli", {}).items()])
+    
+    ultime_ricette = "Nessuna"
+    if archivio_json:
+        nomi = list(archivio_json.keys())[-5:]
+        ultime_ricette = ", ".join(nomi)
+    
+    return f"""
+    CONTESTO ATTUALE:
+    - NEL CARRELLO: Malti: [{malti_c}], Luppoli: [{luppoli_c}].
+    - ULTIME RICETTE PRODOTTE: {ultime_ricette}.
+    - REGOLE ACQUISTI: Luppoli in pacchetti 30g/100g/250g. Malti in sacchi 1kg/5kg/25kg.
+    """
 
 def aggiorna_scorta(categoria, nome, qta, prezzo=None, operazione="set"):
-    mag = carica_magazzino_dict()
+    mag = carica_magazzino()
+    if categoria not in mag:
+        mag[categoria] = {}
     if nome not in mag[categoria]:
         mag[categoria][nome] = {"qta": 0.0, "prezzo": 0.0}
+        
     attuale_qta = mag[categoria][nome].get("qta", 0.0)
     if operazione == "add":
         mag[categoria][nome]["qta"] = attuale_qta + qta
@@ -146,80 +186,25 @@ def aggiorna_scorta(categoria, nome, qta, prezzo=None, operazione="set"):
         mag[categoria][nome]["qta"] = max(0.0, attuale_qta - qta)
     else:
         mag[categoria][nome]["qta"] = qta
+        
     if prezzo is not None:
         mag[categoria][nome]["prezzo"] = prezzo
-    salva_magazzino_dict(mag)
+        
+    salva_magazzino(mag)
 
 def aggiungi_a_shopping_list(ingredienti_ricetta):
-    mag = carica_magazzino_dict()
+    mag = carica_magazzino()
+    if "shopping_list" not in mag or not isinstance(mag["shopping_list"].get("Fermentabili"), dict):
+        mag["shopping_list"] = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}
+    
     for ing in ingredienti_ricetta:
         nome = ing['nome']
         qta_necessaria = ing.get('kg') or ing.get('grammi') or 1
         cat = "Fermentabili" if 'kg' in ing else ("Luppoli" if 'grammi' in ing else "Lieviti")
         attuale = mag["shopping_list"][cat].get(nome, 0.0)
         mag["shopping_list"][cat][nome] = attuale + qta_necessaria
-    salva_magazzino_dict(mag)
-
-def salva_ricetta_gsheets(nome, stile, data_imb, litri, fermentabili, luppoli, yeast, mash_steps, og_r, fg_r, abv_r):
-    df_arc = leggi_foglio("Archivio_Ricette")
-    nuova_row = {
-        "Nome": nome,
-        "Stile": stile,
-        "DataImbottigliamento": str(data_imb),
-        "Litri": litri,
-        "DataCreazione": str(date.today()),
-        "Fermentabili": str(fermentabili),
-        "Luppoli": str(luppoli),
-        "Lievito": str(yeast) if yeast else "",
-        "MashSteps": str(mash_steps),
-        "OG_Reale": og_r,
-        "FG_Reale": fg_r,
-        "ABV_Reale": abv_r
-    }
-    if not df_arc.empty and "Nome" in df_arc.columns:
-        df_arc = df_arc[df_arc["Nome"] != nome]
-        df_arc = pd.concat([df_arc, pd.DataFrame([nuova_row])], ignore_index=True)
-    else:
-        df_arc = pd.DataFrame([nuova_row])
-    salva_foglio("Archivio_Ricette", df_arc)
-
-def elimina_ricetta_gsheets(nome):
-    df_arc = leggi_foglio("Archivio_Ricette")
-    if not df_arc.empty and "Nome" in df_arc.columns:
-        df_arc = df_arc[df_arc["Nome"] != nome]
-        salva_foglio("Archivio_Ricette", df_arc)
-
-def carica_archivio_dict():
-    df_arc = leggi_foglio("Archivio_Ricette")
-    archivio = {}
-    if not df_arc.empty:
-        for _, r in df_arc.iterrows():
-            nome = r.get("Nome")
-            if nome:
-                try: f_list = ast.literal_eval(str(r.get("Fermentabili", "[]")))
-                except: f_list = []
-                try: l_list = ast.literal_eval(str(r.get("Luppoli", "[]")))
-                except: l_list = []
-                try: m_list = ast.literal_eval(str(r.get("MashSteps", "[]")))
-                except: m_list = []
-                try: 
-                    y_val = str(r.get("Lievito", "")).strip()
-                    y_sel = ast.literal_eval(y_val) if y_val and y_val != "nan" else None
-                except: y_sel = None
                 
-                archivio[nome] = {
-                    "stile": r.get("Stile", ""),
-                    "data_imbottigliamento": r.get("DataImbottigliamento", str(date.today())),
-                    "litri": float(r.get("Litri", 25.0)),
-                    "fermentabili": f_list,
-                    "luppoli": l_list,
-                    "yeast": y_sel,
-                    "mash_steps": m_list,
-                    "og_reale": float(r.get("OG_Reale", 1.050)),
-                    "fg_reale": float(r.get("FG_Reale", 1.010)),
-                    "abv_reale": float(r.get("ABV_Reale", 5.5))
-                }
-    return archivio
+    salva_magazzino(mag)
 
 # --- 4. CALCOLI TECNICI BIRRA ---
 def calcola_ricetta_completa(litri_target, fermentabili, luppoli, lievito):
