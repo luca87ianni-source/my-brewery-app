@@ -2,380 +2,13 @@ import streamlit as st
 import pandas as pd
 import os
 import math
-import json
 from datetime import date
 from fpdf import FPDF 
-from google import genai
-from google.genai import types
-import gspread
-from google.oauth2.service_account import Credentials
+import google.generativeai as genai
+from streamlit_gsheets import GSheetsConnection
 
-# --- 1. CONFIGURAZIONE E AUTENTICAZIONE GSPREAD ---
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
-
-@st.cache_resource
-def get_gspread_client():
-    """Inizializza e autentica il client gspread mantenendolo in memoria."""
-    try:
-        if "gcp_service_account" in st.secrets:
-            creds = Credentials.from_service_account_info(
-                dict(st.secrets["gcp_service_account"]),
-                scopes=SCOPES
-            )
-            return gspread.authorize(creds)
-        elif os.path.exists("service_account.json"):
-            creds = Credentials.from_service_account_file(
-                "service_account.json",
-                scopes=SCOPES
-            )
-            return gspread.authorize(creds)
-        return None
-    except Exception as e:
-        st.error(f"Errore di autenticazione GSpread: {e}")
-        return None
-
-def get_spreadsheet():
-    """Recupera l'oggetto Spreadsheet aprendolo da ID o URL salvato nei Secrets."""
-    gc = get_gspread_client()
-    if not gc:
-        return None
-    try:
-        if "SPREADSHEET_ID" in st.secrets and st.secrets["SPREADSHEET_ID"]:
-            return gc.open_by_key(st.secrets["SPREADSHEET_ID"])
-        if "SPREADSHEET_URL" in st.secrets and st.secrets["SPREADSHEET_URL"]:
-            return gc.open_by_url(st.secrets["SPREADSHEET_URL"])
-        return gc.open("SonsOfBrewery_DB")
-    except Exception:
-        return None
-
-# Definizione globale di sh per retrocompatibilità con le funzioni legacy
-sh = get_spreadsheet()
-
-
-# --- 2. GESTIONE LETTURA DATI CON CACHE (300 SECONDI / 5 MINUTI) ---
-@st.cache_data(ttl=300)
-def read_sheet_data(worksheet_name):
-    """
-    Legge una scheda da Google Sheets e la conserva in memoria RAM per 5 minuti.
-    Evita blocchi e l'errore 429 Quota Exceeded durante la navigazione.
-    """
-    spreadsheet = get_spreadsheet()
-    if not spreadsheet:
-        return pd.DataFrame()
-    try:
-        ws = spreadsheet.worksheet(worksheet_name)
-        data = ws.get_all_records()
-        return pd.DataFrame(data)
-    except Exception:
-        # Ritorna un dataframe vuoto invece di far andare l'app in crash
-        return pd.DataFrame()
-
-# --- CARICAMENTO API KEY GEMINI (MODALITÀ SICURA) ---
-def get_api_key():
-    # 1. Prova a leggere dai Secrets di Streamlit (per il Cloud)
-    if "GOOGLE_API_KEY" in st.secrets:
-        return st.secrets["GOOGLE_API_KEY"]
-    
-    # 2. Backup per il locale
-    if os.path.exists("key_gemini.txt"):
-        with open("key_gemini.txt", "r") as f:
-            return f.read().strip()
-            
-    return os.environ.get("GOOGLE_API_KEY", None)
-
-api_key = get_api_key()
-
-if api_key:
-    client = genai.Client(api_key=api_key)
-    st.session_state["api_key_configured"] = True
-else:
-    client = None
-    st.error("Chiave API non trovata! Configura i Secrets su Streamlit o il file key_gemini.txt in locale.")
-
-# --- 1. INIZIALIZZAZIONE SESSION STATE ---
-if 'pagina' not in st.session_state: st.session_state.pagina = "Home"
-if 'chat_history' not in st.session_state: st.session_state.chat_history = [] # Memoria Agente AI
-if 'nome_b' not in st.session_state: st.session_state.nome_b = "Nuova Ricetta"
-if 'stile_b' not in st.session_state: st.session_state.stile_b = ""
-if 'data_imb' not in st.session_state: st.session_state.data_imb = date.today()
-if 'litri_f' not in st.session_state: st.session_state.litri_f = 25.0
-if 'litri_precedenti' not in st.session_state: st.session_state.litri_precedenti = 25.0
-if 'f_list' not in st.session_state: st.session_state.f_list = []
-if 'l_list' not in st.session_state: st.session_state.l_list = []
-if 'm_list' not in st.session_state: st.session_state.m_list = []
-if 'yeast_sel' not in st.session_state: st.session_state.yeast_sel = None
-if 'og_reale' not in st.session_state: st.session_state.og_reale = 1.050
-if 'fg_reale' not in st.session_state: st.session_state.fg_reale = 1.010
-if 'abv_reale' not in st.session_state: st.session_state.abv_reale = 5.5
-
-# --- 2. GESTIONE DATI (JSON LOCALI + GOOGLE SHEETS VIA GSPREAD) ---
-
-@st.cache_data
-def carica_db(tipo):
-    """Carica i database tecnici (Malti, Luppoli, ecc.) dai file JSON locali"""
-    files = {
-        "malti": "database_malti.json",
-        "luppoli": "database_luppoli.json",
-        "lieviti": "database_lieviti.json",
-        "stili": "database_stili.json",
-        "volumi": "database_volumi.json"
-    }
-    f_path = files.get(tipo)
-    if f_path and os.path.exists(f_path):
-        with open(f_path, "r", encoding='utf-8') as f:
-            return json.load(f)
-    return {}
-
-def salva_db(tipo, dati):
-    """Salva le modifiche ai database locali e pulisce la cache di Streamlit"""
-    files = {
-        "malti": "database_malti.json", 
-        "luppoli": "database_luppoli.json", 
-        "lieviti": "database_lieviti.json", 
-        "stili": "database_stili.json", 
-        "volumi": "database_volumi.json"
-    }
-    f_path = files.get(tipo)
-    if f_path:
-        with open(f_path, "w", encoding='utf-8') as f:
-            json.dump(dati, f, indent=4, ensure_ascii=False)
-        st.cache_data.clear()
-
-# --- FUNZIONI GOOGLE SHEETS FOR MAGAZZINO, SHOPPING LIST E ARCHIVIO ---
-
-def read_worksheet_df(worksheet_name):
-    """Helper per leggere un foglio Google e restituirlo come DataFrame Pandas"""
-    if not sh:
-        return pd.DataFrame()
-    try:
-        ws = sh.worksheet(worksheet_name)
-        records = ws.get_all_records()
-        return pd.DataFrame(records)
-    except Exception as e:
-        return pd.DataFrame()
-
-def write_worksheet_df(worksheet_name, df):
-    """Helper per sovrascrivere un intero foglio Google con un DataFrame Pandas"""
-    if not sh:
-        return
-    try:
-        try:
-            ws = sh.worksheet(worksheet_name)
-        except gspread.exceptions.WorksheetNotFound:
-            ws = sh.add_worksheet(title=worksheet_name, rows="100", cols="20")
-        
-        ws.clear()
-        # Converte il DataFrame in lista di liste includendo l'intestazione
-        data = [df.columns.values.tolist()] + df.fillna("").astype(str).values.tolist()
-        ws.update("A1", data)
-    except Exception as e:
-        st.error(f"Errore nel salvataggio del foglio {worksheet_name}: {e}")
-
-def carica_magazzino():
-    """Legge la scheda 'Magazzino' da Google Sheets via gspread."""
-    try:
-        df = read_worksheet_df("Magazzino")
-        mag = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {}}
-        
-        if not df.empty:
-            for _, row in df.iterrows():
-                cat = row.get("Categoria")
-                nome = row.get("Nome")
-                if cat in ["Fermentabili", "Luppoli", "Lieviti"] and pd.notna(nome) and str(nome).strip():
-                    try:
-                        qta_val = float(row.get("Quantita", 0.0))
-                    except (ValueError, TypeError):
-                        qta_val = 0.0
-                    try:
-                        prezzo_val = float(row.get("Prezzo", 0.0))
-                    except (ValueError, TypeError):
-                        prezzo_val = 0.0
-                    
-                    mag[cat][str(nome)] = {
-                        "qta": qta_val,
-                        "prezzo": prezzo_val
-                    }
-        
-        mag["shopping_list"] = carica_shopping_list_dict()
-        return mag
-    except Exception as e:
-        st.warning(f"Errore nella lettura del Magazzino da GSheets: {e}")
-        return {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {}}
-
-def salva_magazzino(data):
-    """Salva il Magazzino su Google Sheets via gspread."""
-    righe = []
-    for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
-        unita = "Kg" if cat == "Fermentabili" else ("g" if cat == "Luppoli" else "Unita")
-        for nome, info in data.get(cat, {}).items():
-            righe.append({
-                "Categoria": cat,
-                "Nome": nome,
-                "Quantita": float(info.get("qta", 0.0)),
-                "Unita": unita,
-                "Prezzo": float(info.get("prezzo", 0.0))
-            })
-    
-    df = pd.DataFrame(righe, columns=["Categoria", "Nome", "Quantita", "Unita", "Prezzo"])
-    write_worksheet_df("Magazzino", df)
-    
-    if "shopping_list" in data:
-        salva_shopping_list_dict(data["shopping_list"])
-
-def carica_shopping_list_dict():
-    """Helper per caricare la scheda 'Shopping_List' via gspread."""
-    try:
-        df = read_worksheet_df("Shopping_List")
-        shop = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}
-        if not df.empty:
-            for _, row in df.iterrows():
-                cat = row.get("Categoria")
-                nome = row.get("Nome")
-                if cat in shop and pd.notna(nome) and str(nome).strip():
-                    try:
-                        qta_val = float(row.get("Quantita", 0.0))
-                    except (ValueError, TypeError):
-                        qta_val = 0.0
-                    shop[cat][str(nome)] = qta_val
-        return shop
-    except Exception:
-        return {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}
-
-def salva_shopping_list_dict(shop_data):
-    """Helper per salvare la Shopping List su Google Sheets via gspread."""
-    righe = []
-    for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
-        unita = "Kg" if cat == "Fermentabili" else ("g" if cat == "Luppoli" else "Unita")
-        for nome, qta in shop_data.get(cat, {}).items():
-            righe.append({
-                "Categoria": cat,
-                "Nome": nome,
-                "Quantita": float(qta),
-                "Unita": unita,
-                "Formato_Pacchetto": ""
-            })
-    df = pd.DataFrame(righe, columns=["Categoria", "Nome", "Quantita", "Unita", "Formato_Pacchetto"])
-    write_worksheet_df("Shopping_List", df)
-
-def carica_archivio():
-    """Carica l'Archivio Ricette da Google Sheets deserializzando i dati JSON."""
-    try:
-        df = read_worksheet_df("Archivio_Ricette")
-        if df.empty:
-            return {}
-        
-        archivio = {}
-        for _, row in df.iterrows():
-            nome = str(row.get("Nome", "")).strip()
-            if not nome:
-                continue
-                
-            def da_json(val):
-                if isinstance(val, str) and val.strip():
-                    try:
-                        return json.loads(val)
-                    except json.JSONDecodeError:
-                        return []
-                return val if isinstance(val, (list, dict)) else []
-
-            try:
-                litri_val = float(row.get("Litri", 25.0))
-            except (ValueError, TypeError):
-                litri_val = 25.0
-
-            archivio[nome] = {
-                "stile": str(row.get("Stile", "")),
-                "data_imbottigliamento": str(row.get("Data_Cotta", "")),
-                "litri": litri_val,
-                "data": str(row.get("Data_Cotta", "")),
-                "fermentabili": da_json(row.get("Fermentabili_JSON")),
-                "luppoli": da_json(row.get("Luppoli_JSON")),
-                "yeast": da_json(row.get("Lievito")),
-                "mash_steps": da_json(row.get("Note")),
-                "og_reale": 1.050,
-                "fg_reale": 1.010,
-                "abv_reale": 5.5
-            }
-        return archivio
-    except Exception as e:
-        st.warning(f"Errore lettura Archivio Ricette da GSheets: {e}")
-        return {}
-
-def salva_archivio(dati):
-    """Serializza e salva l'Archivio Ricette su Google Sheets via gspread."""
-    righe = []
-    for idx, (nome, d) in enumerate(dati.items(), start=1):
-        righe.append({
-            "ID_Ricetta": idx,
-            "Nome": nome,
-            "Stile": d.get("stile", ""),
-            "Data_Cotta": d.get("data_imbottigliamento", str(date.today())),
-            "Litri": d.get("litri", 25.0),
-            "Fermentabili_JSON": json.dumps(d.get("fermentabili", []), ensure_ascii=False),
-            "Luppoli_JSON": json.dumps(d.get("luppoli", []), ensure_ascii=False),
-            "Lievito": json.dumps(d.get("yeast", {}), ensure_ascii=False),
-            "Note": json.dumps(d.get("mash_steps", []), ensure_ascii=False)
-        })
-    
-    df = pd.DataFrame(righe, columns=[
-        "ID_Ricetta", "Nome", "Stile", "Data_Cotta", "Litri", 
-        "Fermentabili_JSON", "Luppoli_JSON", "Lievito", "Note"
-    ])
-    write_worksheet_df("Archivio_Ricette", df)
-
-def genera_contesto_aigor(mag, archivio_json):
-    """Trasforma i dati in testo per l'IA"""
-    carrello = mag.get("shopping_list", {})
-    malti_c = ", ".join([f"{n} ({q}kg)" for n, q in carrello.get("Fermentabili", {}).items()])
-    luppoli_c = ", ".join([f"{n} ({q}g)" for n, q in carrello.get("Luppoli", {}).items()])
-    
-    ultime_ricette = "Nessuna"
-    if archivio_json:
-        nomi = list(archivio_json.keys())[-5:]
-        ultime_ricette = ", ".join(nomi)
-    
-    contesto = f"""
-    CONTESTO ATTUALE DI LUCA:
-    - NEL CARRELLO: Malti: [{malti_c}], Luppoli: [{luppoli_c}].
-    - ULTIME RICETTE PRODOTTE: {ultime_ricette}.
-    - REGOLE: Luppolo pacchetti 30g/100g/250g. Malti sacchi 1kg/5kg/25kg.
-    """
-    return contesto
-
-def aggiorna_scorta(categoria, nome, qta, prezzo=None, operazione="set"):
-    mag = carica_magazzino()
-    if nome not in mag[categoria]:
-        mag[categoria][nome] = {"qta": 0.0, "prezzo": 0.0}
-    attuale_qta = mag[categoria][nome].get("qta", 0.0)
-    if operazione == "add":
-        mag[categoria][nome]["qta"] = attuale_qta + qta
-    elif operazione == "sub":
-        mag[categoria][nome]["qta"] = max(0.0, attuale_qta - qta)
-    else:
-        mag[categoria][nome]["qta"] = qta
-    if prezzo is not None:
-        mag[categoria][nome]["prezzo"] = prezzo
-    salva_magazzino(mag)
-
-def aggiungi_a_shopping_list(ingredienti_ricetta):
-    mag = carica_magazzino()
-    if "shopping_list" not in mag or not isinstance(mag["shopping_list"].get("Fermentabili"), dict):
-        mag["shopping_list"] = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}
-    
-    for ing in ingredienti_ricetta:
-        nome = ing['nome']
-        qta_necessaria = ing.get('kg') or ing.get('grammi') or 1
-        cat = "Fermentabili" if 'kg' in ing else ("Luppoli" if 'grammi' in ing else "Lieviti")
-        attuale = mag["shopping_list"][cat].get(nome, 0.0)
-        mag["shopping_list"][cat][nome] = attuale + qta_necessaria
-                
-    salva_magazzino(mag)
-
-# --- 3. CONFIGURAZIONE E STILE CSS ---
-st.set_page_config(page_title="Sons of Brewery Master V7.1.5", layout="wide")
+# --- 0. CONFIGURAZIONE E STILE CSS ---
+st.set_page_config(page_title="Sons of Brewery Master V7.2 - GSheets", layout="wide")
 
 st.markdown("""
     <style>
@@ -384,20 +17,16 @@ st.markdown("""
     [data-testid="stWidgetLabel"] p { color: #FFD700 !important; font-weight: bold !important; background-color: transparent !important; }
     .stTextInput input, .stNumberInput input, div[data-baseweb="select"] > div { background-color: #ffffff !important; color: #000000 !important; }
     
-    /* SELETTORE BOTTONI GIALLI - FORZA TESTO NERO */
+    /* BOTTONI GIALLI STANDARD */
     div.stButton > button, div.stButton > button p {
         background-color: #FFD700 !important;
         color: #000000 !important;
         font-weight: 900 !important;
-    }
-
-    /* FIX SPECIFICO PER I BOTTONI STANDARD */
-    div.stButton > button {
         border-radius: 5px !important;
         border: 1px solid #000000 !important;
     }
 
-    /* SELETTORE BOTTONI DOWNLOAD - TESTO BIANCO */
+    /* BOTTONI DOWNLOAD */
     div.stDownloadButton > button, div.stDownloadButton > button p {
         background-color: #4A90E2 !important;
         color: #ffffff !important;
@@ -416,53 +45,183 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. FUNZIONI LOGICHE ---
+# --- CARICAMENTO API KEY GEMINI ---
+def get_api_key():
+    if "GOOGLE_API_KEY" in st.secrets:
+        return st.secrets["GOOGLE_API_KEY"]
+    if os.path.exists("key_gemini.txt"):
+        with open("key_gemini.txt", "r") as f:
+            return f.read().strip()
+    return None
 
-def inizializza_database():
-    """Trasforma i file JSON in DataFrame all'avvio dell'app"""
-    def to_df(data, key_name):
-        if not data:
-            return pd.DataFrame()
-        df = pd.DataFrame.from_dict(data, orient='index')
-        df.index.name = key_name
-        return df.reset_index()
+api_key = get_api_key()
+if api_key:
+    genai.configure(api_key=api_key)
 
-    df_f = to_df(carica_db("malti"), "Fermentabile")
-    df_l = to_df(carica_db("luppoli"), "Luppolo")
-    df_y = to_df(carica_db("lieviti"), "Lievito")
-    df_s = to_df(carica_db("stili"), "Stile")
-    return df_f, df_l, df_y, df_s
+# --- CONNECTOR GOOGLE SHEETS ---
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Creazione dei DataFrame globali
-df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
+def leggi_foglio(worksheet_name):
+    try:
+        df = conn.read(worksheet=worksheet_name, ttl="0s")
+        return df.dropna(how="all") if df is not None else pd.DataFrame()
+    except Exception as e:
+        return pd.DataFrame()
 
-def salva_su_file(nome, stile, data_imb, litri, fermentabili, luppoli, yeast, mash_steps, og_r, fg_r, abv_r):
-    """Salva la ricetta nell'archivio su Google Sheets"""
-    archivio = carica_archivio()
-    archivio[nome] = {
-        "stile": stile, 
-        "data_imbottigliamento": str(data_imb),
-        "litri": litri, 
-        "data": str(date.today()), 
-        "fermentabili": fermentabili, 
-        "luppoli": luppoli, 
-        "yeast": yeast, 
-        "mash_steps": mash_steps,
-        "og_reale": og_r,
-        "fg_reale": fg_r,
-        "abv_reale": abv_r
+def salva_foglio(worksheet_name, df):
+    conn.update(worksheet=worksheet_name, data=df)
+    st.cache_data.clear()
+
+# --- 1. INIZIALIZZAZIONE SESSION STATE ---
+if 'pagina' not in st.session_state: st.session_state.pagina = "Home"
+if 'chat_history' not in st.session_state: st.session_state.chat_history = []
+if 'nome_b' not in st.session_state: st.session_state.nome_b = "Nuova Ricetta"
+if 'stile_b' not in st.session_state: st.session_state.stile_b = ""
+if 'data_imb' not in st.session_state: st.session_state.data_imb = date.today()
+if 'litri_f' not in st.session_state: st.session_state.litri_f = 25.0
+if 'litri_precedenti' not in st.session_state: st.session_state.litri_precedenti = 25.0
+if 'f_list' not in st.session_state: st.session_state.f_list = []
+if 'l_list' not in st.session_state: st.session_state.l_list = []
+if 'm_list' not in st.session_state: st.session_state.m_list = []
+if 'yeast_sel' not in st.session_state: st.session_state.yeast_sel = None
+if 'og_reale' not in st.session_state: st.session_state.og_reale = 1.050
+if 'fg_reale' not in st.session_state: st.session_state.fg_reale = 1.010
+if 'abv_reale' not in st.session_state: st.session_state.abv_reale = 5.5
+
+# --- 2. CARICAMENTO DATABASE INGREDENTI E STILI DA GSHEETS ---
+df_f_m = leggi_foglio("Database_Malti")
+df_l_m = leggi_foglio("Database_Luppoli")
+df_y_m = leggi_foglio("Database_Lieviti")
+df_s_m = leggi_foglio("Database_Stili")
+
+# --- 3. FUNZIONI OPERATIVE MAGAZZINO E ARCHIVIO GSHEETS ---
+def carica_magazzino_dict():
+    df_mag = leggi_foglio("Magazzino")
+    mag = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}}
+    if not df_mag.empty:
+        for _, row in df_mag.iterrows():
+            cat = str(row.get("Categoria", "")).strip()
+            nome = str(row.get("Nome", "")).strip()
+            qta = float(row.get("Quantita", 0.0))
+            prezzo = float(row.get("Prezzo", 0.0))
+            is_shop = bool(row.get("InShoppingList", False))
+            
+            if cat in ["Fermentabili", "Luppoli", "Lieviti"]:
+                if is_shop:
+                    mag["shopping_list"][cat][nome] = qta
+                else:
+                    mag[cat][nome] = {"qta": qta, "prezzo": prezzo}
+    return mag
+
+def salva_magazzino_dict(mag):
+    rows = []
+    for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
+        for nome, item in mag.get(cat, {}).items():
+            rows.append({
+                "Categoria": cat,
+                "Nome": nome,
+                "Quantita": item.get("qta", 0.0),
+                "Prezzo": item.get("prezzo", 0.0),
+                "InShoppingList": False
+            })
+        for nome, qta in mag.get("shopping_list", {}).get(cat, {}).items():
+            rows.append({
+                "Categoria": cat,
+                "Nome": nome,
+                "Quantita": qta,
+                "Prezzo": 0.0,
+                "InShoppingList": True
+            })
+    salva_foglio("Magazzino", pd.DataFrame(rows))
+
+def aggiorna_scorta(categoria, nome, qta, prezzo=None, operazione="set"):
+    mag = carica_magazzino_dict()
+    if nome not in mag[categoria]:
+        mag[categoria][nome] = {"qta": 0.0, "prezzo": 0.0}
+    attuale_qta = mag[categoria][nome].get("qta", 0.0)
+    if operazione == "add":
+        mag[categoria][nome]["qta"] = attuale_qta + qta
+    elif operazione == "sub":
+        mag[categoria][nome]["qta"] = max(0.0, attuale_qta - qta)
+    else:
+        mag[categoria][nome]["qta"] = qta
+    if prezzo is not None:
+        mag[categoria][nome]["prezzo"] = prezzo
+    salva_magazzino_dict(mag)
+
+def aggiungi_a_shopping_list(ingredienti_ricetta):
+    mag = carica_magazzino_dict()
+    for ing in ingredienti_ricetta:
+        nome = ing['nome']
+        qta_necessaria = ing.get('kg') or ing.get('grammi') or 1
+        cat = "Fermentabili" if 'kg' in ing else ("Luppoli" if 'grammi' in ing else "Lieviti")
+        attuale = mag["shopping_list"][cat].get(nome, 0.0)
+        mag["shopping_list"][cat][nome] = attuale + qta_necessaria
+    salva_magazzino_dict(mag)
+
+import json
+
+def salva_ricetta_gsheets(nome, stile, data_imb, litri, fermentabili, luppoli, yeast, mash_steps, og_r, fg_r, abv_r):
+    df_arc = leggi_foglio("Archivio_Ricette")
+    nuova_row = {
+        "Nome": nome,
+        "Stile": stile,
+        "DataImbottigliamento": str(data_imb),
+        "Litri": litri,
+        "DataCreazione": str(date.today()),
+        "Fermentabili": json.dumps(fermentabili),
+        "Luppoli": json.dumps(luppoli),
+        "Lievito": json.dumps(yeast) if yeast else "",
+        "MashSteps": json.dumps(mash_steps),
+        "OG_Reale": og_r,
+        "FG_Reale": fg_r,
+        "ABV_Reale": abv_r
     }
-    salva_archivio(archivio)
+    if not df_arc.empty and "Nome" in df_arc.columns:
+        df_arc = df_arc[df_arc["Nome"] != nome]
+        df_arc = pd.concat([df_arc, pd.DataFrame([nuova_row])], ignore_index=True)
+    else:
+        df_arc = pd.DataFrame([nuova_row])
+    salva_foglio("Archivio_Ricette", df_arc)
 
-def elimina_da_file(nome):
-    """Elimina una ricetta dall'archivio Google Sheets"""
-    archivio = carica_archivio()
-    if nome in archivio:
-        del archivio[nome]
-        salva_archivio(archivio)
+def elimina_ricetta_gsheets(nome):
+    df_arc = leggi_foglio("Archivio_Ricette")
+    if not df_arc.empty and "Nome" in df_arc.columns:
+        df_arc = df_arc[df_arc["Nome"] != nome]
+        salva_foglio("Archivio_Ricette", df_arc)
 
+def carica_archivio_dict():
+    df_arc = leggi_foglio("Archivio_Ricette")
+    archivio = {}
+    if not df_arc.empty:
+        for _, r in df_arc.iterrows():
+            nome = r.get("Nome")
+            if nome:
+                try: f_list = json.loads(r.get("Fermentabili", "[]"))
+                except: f_list = []
+                try: l_list = json.loads(r.get("Luppoli", "[]"))
+                except: l_list = []
+                try: m_list = json.loads(r.get("MashSteps", "[]"))
+                except: m_list = []
+                try: y_sel = json.loads(r.get("Lievito", "null"))
+                except: y_sel = None
+                
+                archivio[nome] = {
+                    "stile": r.get("Stile", ""),
+                    "data_imbottigliamento": r.get("DataImbottigliamento", str(date.today())),
+                    "litri": float(r.get("Litri", 25.0)),
+                    "fermentabili": f_list,
+                    "luppoli": l_list,
+                    "yeast": y_sel,
+                    "mash_steps": m_list,
+                    "og_reale": float(r.get("OG_Reale", 1.050)),
+                    "fg_reale": float(r.get("FG_Reale", 1.010)),
+                    "abv_reale": float(r.get("ABV_Reale", 5.5))
+                }
+    return archivio
+
+# --- 4. CALCOLI TECNICI BIRRA ---
 def calcola_ricetta_completa(litri_target, fermentabili, luppoli, lievito):
-    """Logica di calcolo dei parametri della birra (OG, FG, IBU, EBC)"""
     EFF = 0.777; EVAP = 3.0; P_RAFF = 3.0; SM_MASH = 6.8; ASS_G = 0.96; R_MASH = 3.0
     og, v_pre, a_m, a_s, tot_kg, tot_ibu, fg, abv, tot_ebc = 1.0, 0, 0, 0, 0, 0.0, 1.0, 0.0, 0.0
     
@@ -501,7 +260,6 @@ def calcola_ricetta_completa(litri_target, fermentabili, luppoli, lievito):
     return og, v_pre, a_m, a_s, tot_kg, tot_ibu, fg, abv, tot_ebc
 
 def ebc_to_hex(ebc):
-    """Converte il valore EBC nel colore HEX corrispondente"""
     if ebc <= 4: return "#F3F9BE"
     elif ebc <= 8: return "#F6F510"
     elif ebc <= 16: return "#E0D01B"
@@ -512,7 +270,6 @@ def ebc_to_hex(ebc):
     return "#080707"
 
 def check_range(valore, v_min, v_max):
-    """Confronto tra valore calcolato e range BJCP"""
     try:
         v_min, v_max = float(v_min), float(v_max)
         if v_min == 0 and v_max == 0: return "⚪", "gray", "n.d."
@@ -533,32 +290,7 @@ def calcola_ripartizione_bottiglie(litri_netti):
         elif residuo >= 1.50: bot_050 += 3; residuo -= 1.50
     return 9, bot_066, bot_050, max(0.0, residuo)
 
-def ottimizza_pacchetti_malto(kg_necessari):
-    if kg_necessari <= 0: return {}
-    n25 = int(kg_necessari // 25); resto = kg_necessari % 25
-    n5 = int(resto // 5); resto = resto % 5
-    n1 = int(math.ceil(resto))
-    res = {}
-    if n25 > 0: res["Sacco 25kg"] = n25
-    if n5 > 0: res["Sacco 5kg"] = n5
-    if n1 > 0: res["Sacco 1kg"] = n1
-    return res
-
-def ottimizza_pacchetti_luppolo(g_necessari):
-    if g_necessari <= 0: return {}
-    n250 = int(g_necessari // 250); resto = g_necessari % 250
-    if resto > 180: n250 += 1; resto = 0
-    n100 = int(resto // 100); resto = resto % 100
-    if resto > 70: n100 += 1; resto = 0
-    n30 = int(math.ceil(resto / 30))
-    res = {}
-    if n250 > 0: res["Busta 250g"] = n250
-    if n100 > 0: res["Busta 100g"] = n100
-    if n30 > 0: res["Busta 30g"] = n30
-    return res
-
 def scala_ingredienti(nuovi_litri, vecchi_litri, fermentabili, luppoli):
-    """Riscala le quantità in base ai nuovi litri target"""
     if vecchi_litri <= 0 or nuovi_litri == vecchi_litri:
         return fermentabili, luppoli
     ratio = nuovi_litri / vecchi_litri
@@ -566,13 +298,13 @@ def scala_ingredienti(nuovi_litri, vecchi_litri, fermentabili, luppoli):
     for l in luppoli: l['grammi'] = round(l['grammi'] * ratio, 1)
     return fermentabili, luppoli
 
-# --- 5. FUNZIONE PDF SCHEDA ---
+# --- 5. FUNZIONI PDF SCHEDA ED ETICHETTE ---
 def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, fermentabili, luppoli, lievito, mash_steps):
     pdf = FPDF()
     pdf.add_page()
     
     try:
-        pdf.add_font('Freakshow', '', 'Carnevalee_Freakshow.ttf', uni=True)
+        pdf.add_font('Freakshow', '', 'Carnevalee Freakshow.ttf', uni=True)
         font_titolo = 'Freakshow'
     except:
         font_titolo = 'Helvetica'
@@ -633,13 +365,12 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
 
     return bytes(pdf.output())
 
-# --- 5b. FUNZIONE PDF ETICHETTE ---
 def genera_pdf_etichette(nome, stile, abv, data_imb):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     
-    if os.path.exists("Carnevalee_Freakshow.ttf"):
-        pdf.add_font("Carnivalee", "", "Carnevalee_Freakshow.ttf")
+    if os.path.exists("Carnevalee Freakshow.ttf"):
+        pdf.add_font("Carnivalee", "", "Carnevalee Freakshow.ttf")
         font_main = "Carnivalee"
     else:
         font_main = "Helvetica"
@@ -648,8 +379,7 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
     w_et, h_et = 55, 73
     scale = min(w_et / BASE_W, h_et / BASE_H)
 
-    def s(v):
-        return v * scale
+    def s(v): return v * scale
 
     m_x = (210 - (3 * w_et)) / 2
     m_y = (297 - (3 * h_et)) / 2
@@ -670,9 +400,6 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
         if os.path.exists("Logo Medium.png"):
             p_w = s(35)
             pdf.image("Logo Medium.png", x + (w_et - p_w) / 2, y + s(14), p_w)
-
-        pdf.set_font("Times", 'B', max(1, int(7 * scale)))
-        pdf.set_xy(x, y + s(48))
 
         pdf.set_font(font_main, "", max(1, int(20 * scale)))
         pdf.set_xy(x, y + s(55))
@@ -695,9 +422,8 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
 
     return bytes(pdf.output())
 
-# --- 6. SIDEBAR ---
-db_stili_sidebar = carica_db("stili")
-opzioni_s = sorted(list(db_stili_sidebar.keys()))
+# --- 6. SIDEBAR NAVIGAZIONE & ARCHIVIO ---
+opzioni_s = sorted(df_s_m["Stile"].dropna().tolist()) if not df_s_m.empty and "Stile" in df_s_m.columns else []
 
 with st.sidebar:
     if os.path.exists("Logo.png"): 
@@ -705,49 +431,59 @@ with st.sidebar:
     
     st.markdown("<h2 style='color:#FFD700;'>SONS OF BREWERY</h2>", unsafe_allow_html=True)
     
-    if st.button("🏠 DASHBOARD", width="stretch"): 
-        st.session_state.pagina = "Home"; st.rerun()
-    if st.button("🛠️ EDITOR RICETTA", width="stretch"): 
-        st.session_state.pagina = "Editor"; st.rerun()
-    if st.button("📦 MAGAZZINO", width="stretch"): 
-        st.session_state.pagina = "Magazzino"; st.rerun()
-    if st.button("🤖 AIGOR", width="stretch"): 
-        st.session_state.pagina = "AIGOR"; st.rerun()
-    if st.button("⚙️ DATABASE", width="stretch"): 
-        st.session_state.pagina = "Database"; st.rerun()
+    if st.button("🏠 DASHBOARD", width="stretch"): st.session_state.pagina = "Home"; st.rerun()
+    if st.button("🛠️ EDITOR RICETTA", width="stretch"): st.session_state.pagina = "Editor"; st.rerun()
+    if st.button("📦 MAGAZZINO", width="stretch"): st.session_state.pagina = "Magazzino"; st.rerun()
+    if st.button("🤖 AIGOR", width="stretch"): st.session_state.pagina = "AIGOR"; st.rerun()
+    if st.button("⚙️ DATABASE", width="stretch"): st.session_state.pagina = "Database"; st.rerun()
 
     st.divider()
-    st.subheader("📁 ARCHIVIO")
-    archivio = carica_archivio()
+    st.subheader("📁 ARCHIVIO RICETTE")
+    archivio = carica_archivio_dict()
     for nome_r in list(archivio.keys()):
         c_side = st.columns([0.8, 0.2])
         if c_side[0].button(f"📖 {nome_r}", key=f"s_{nome_r}", width="stretch"):
             d = archivio[nome_r]
             st.session_state.nome_b, st.session_state.stile_b = nome_r, d.get('stile','')
-            if 'data_imbottigliamento' in d:
-                try:
-                    st.session_state.data_imb = date.fromisoformat(d['data_imbottigliamento'])
-                except ValueError:
-                    st.session_state.data_imb = date.today()
+            if d.get('data_imbottigliamento'):
+                try: st.session_state.data_imb = date.fromisoformat(d['data_imbottigliamento'])
+                except: st.session_state.data_imb = date.today()
             st.session_state.litri_f = d.get('litri',25.0)
             st.session_state.f_list = d.get('fermentabili',[])
             st.session_state.l_list = d.get('luppoli',[])
             st.session_state.m_list = d.get('mash_steps',[])
             st.session_state.yeast_sel = d.get('yeast')
+            st.session_state.og_reale = d.get('og_reale', 1.050)
+            st.session_state.fg_reale = d.get('fg_reale', 1.010)
+            st.session_state.abv_reale = d.get('abv_reale', 5.5)
             st.session_state.pagina = "Editor"; st.rerun()
         
         if c_side[1].button("🗑️", key=f"d_{nome_r}"): 
-            elimina_da_file(nome_r); st.rerun()
+            elimina_ricetta_gsheets(nome_r); st.rerun()
 
-# --- 7. PAGINA MAGAZZINO ---
-if st.session_state.pagina == "Magazzino":
-    st.title("📦 Magazzino Scorte (GSpread)")
-    mag = carica_magazzino()
+# --- 7. PAGINA HOME / DASHBOARD ---
+if st.session_state.pagina == "Home":
+    st.title("🏠 Sons of Brewery Dashboard")
+    st.markdown(" Benvenuto nel sistema centralizzato su Google Sheets. Seleziona una voce dal menu a sinistra per iniziare.")
+    
+    col_h1, col_h2, col_h3 = st.columns(3)
+    mag = carica_magazzino_dict()
+    col_h1.metric("Malti in Magazzino", f"{len(mag['Fermentabili'])} tipi")
+    col_h2.metric("Luppoli in Magazzino", f"{len(mag['Luppoli'])} tipi")
+    col_h3.metric("Ricette Archiviate", f"{len(carica_archivio_dict())}")
+
+# --- 8. PAGINA MAGAZZINO ---
+elif st.session_state.pagina == "Magazzino":
+    st.title("📦 Magazzino Scorte")
+    mag = carica_magazzino_dict()
     t1, t2, t3 = st.tabs(["Malti", "Luppoli", "Lieviti"])
     
+    lista_malti = sorted(df_f_m["Fermentabile"].dropna().tolist()) if not df_f_m.empty and "Fermentabile" in df_f_m.columns else []
+    lista_luppoli = sorted(df_l_m["Luppolo"].dropna().tolist()) if not df_l_m.empty and "Luppolo" in df_l_m.columns else []
+    lista_lieviti = sorted(df_y_m["Lievito"].dropna().tolist()) if not df_y_m.empty and "Lievito" in df_y_m.columns else []
+
     with t1:
         c1, c2, c3, c4 = st.columns([3,1,1,1])
-        lista_malti = sorted(df_f_m["Fermentabile"].tolist()) if not df_f_m.empty else []
         m_sel = c1.selectbox("Malto", options=[""] + lista_malti)
         m_qta = c2.number_input("Kg", min_value=0.0, step=0.5, key="add_m_qta")
         m_prz = c3.number_input("Euro", min_value=0.0, step=0.5, key="add_m_prz")
@@ -755,22 +491,19 @@ if st.session_state.pagina == "Magazzino":
             if m_sel:
                 aggiorna_scorta("Fermentabili", m_sel, m_qta, m_prz, "add")
                 st.rerun()
-            else:
-                st.error("Seleziona un malto")
 
-        for k, v in mag["Fermentabili"].items():
+        for k, v in list(mag["Fermentabili"].items()):
             cc = st.columns([3,1,1,1])
             cc[0].write(f"**{k}**")
             cc[1].write(f"{v['qta']:.1f} Kg")
             cc[2].write(f"{v.get('prezzo', 0.0):.2f} €")
             if cc[3].button("🗑️", key=f"del_f_{k}"):
                 del mag["Fermentabili"][k]
-                salva_magazzino(mag)
+                salva_magazzino_dict(mag)
                 st.rerun()
 
     with t2:
         c1, c2, c3, c4 = st.columns([3,1,1,1])
-        lista_luppoli = sorted(df_l_m["Luppolo"].tolist()) if not df_l_m.empty else []
         l_sel = c1.selectbox("Luppolo", options=[""] + lista_luppoli)
         l_qta = c2.number_input("Grammi", min_value=0.0, step=10.0, key="add_l_qta")
         l_prz = c3.number_input("Euro", min_value=0.0, step=0.5, key="add_l_prz")
@@ -778,22 +511,19 @@ if st.session_state.pagina == "Magazzino":
             if l_sel:
                 aggiorna_scorta("Luppoli", l_sel, l_qta, l_prz, "add")
                 st.rerun()
-            else:
-                st.error("Seleziona un luppolo")
 
-        for k, v in mag["Luppoli"].items():
+        for k, v in list(mag["Luppoli"].items()):
             cc = st.columns([3,1,1,1])
             cc[0].write(f"**{k}**")
             cc[1].write(f"{v['qta']:.0f} g")
             cc[2].write(f"{v.get('prezzo', 0.0):.2f} €")
             if cc[3].button("🗑️", key=f"del_l_{k}"):
                 del mag["Luppoli"][k]
-                salva_magazzino(mag)
+                salva_magazzino_dict(mag)
                 st.rerun()
 
     with t3:
         c1, c2, c3, c4 = st.columns([3,1,1,1])
-        lista_lieviti = sorted(df_y_m["Lievito"].tolist()) if not df_y_m.empty else []
         y_sel = c1.selectbox("Lievito", options=[""] + lista_lieviti)
         y_qta = c2.number_input("Unità", min_value=0.0, step=1.0, key="add_y_qta")
         y_prz = c3.number_input("Euro", min_value=0.0, step=0.5, key="add_y_prz")
@@ -801,23 +531,19 @@ if st.session_state.pagina == "Magazzino":
             if y_sel:
                 aggiorna_scorta("Lieviti", y_sel, y_qta, y_prz, "add")
                 st.rerun()
-            else:
-                st.error("Seleziona un lievito")
 
-        for k, v in mag["Lieviti"].items():
+        for k, v in list(mag["Lieviti"].items()):
             cc = st.columns([3,1,1,1])
             cc[0].write(f"**{k}**")
             cc[1].write(f"{v['qta']:.0f} Unità")
             cc[2].write(f"{v.get('prezzo', 0.0):.2f} €")
             if cc[3].button("🗑️", key=f"del_y_{k}"):
                 del mag["Lieviti"][k]
-                salva_magazzino(mag)
+                salva_magazzino_dict(mag)
                 st.rerun()
 
     st.divider()
     st.header("🛒 CARRELLO: COSA DEVI COMPRARE")
-    st.caption("Suggerimenti ottimizzati in base ai formati commerciali (Sacchi e Pacchetti).")
-
     carrello_lordo = mag.get("shopping_list", {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}})
     tab_c1, tab_c2, tab_c3 = st.tabs(["🌾 MALTI", "🌿 LUPPOLI", "🧫 LIEVITI"])
     
@@ -838,7 +564,7 @@ if st.session_state.pagina == "Magazzino":
                 malti_da_comprare = True
         if not malti_da_comprare: st.info("Nessun malto da acquistare.")
         if st.button("🗑️ SVUOTA MALTI", key="clear_c_f", use_container_width=True):
-            mag["shopping_list"]["Fermentabili"] = {}; salva_magazzino(mag); st.rerun()
+            mag["shopping_list"]["Fermentabili"] = {}; salva_magazzino_dict(mag); st.rerun()
 
     with tab_c2:
         luppoli_da_comprare = False
@@ -857,7 +583,7 @@ if st.session_state.pagina == "Magazzino":
                 luppoli_da_comprare = True
         if not luppoli_da_comprare: st.info("Nessun luppolo da acquistare.")
         if st.button("🗑️ SVUOTA LUPPOLI", key="clear_c_l", use_container_width=True):
-            mag["shopping_list"]["Luppoli"] = {}; salva_magazzino(mag); st.rerun()
+            mag["shopping_list"]["Luppoli"] = {}; salva_magazzino_dict(mag); st.rerun()
 
     with tab_c3:
         lieviti_da_comprare = False
@@ -869,18 +595,16 @@ if st.session_state.pagina == "Magazzino":
                 lieviti_da_comprare = True
         if not lieviti_da_comprare: st.info("Nessun lievito da acquistare.")
         if st.button("🗑️ SVUOTA LIEVITI", key="clear_c_y", use_container_width=True):
-            mag["shopping_list"]["Lieviti"] = {}; salva_magazzino(mag); st.rerun()
+            mag["shopping_list"]["Lieviti"] = {}; salva_magazzino_dict(mag); st.rerun()
 
-# --- 8. PAGINA EDITOR ---
+# --- 9. PAGINA EDITOR RICETTA ---
 elif st.session_state.pagina == "Editor":
     st.title(f"🛠️ Editor: {st.session_state.nome_b}")
-    mag = carica_magazzino()
+    mag = carica_magazzino_dict()
     
-    # --- 1. INPUT DATI PRINCIPALI ---
     c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
     st.session_state.nome_b = c1.text_input("NOME", value=st.session_state.nome_b)
     st.session_state.stile_b = c2.selectbox("STILE", options=[""] + opzioni_s, index=(opzioni_s.index(st.session_state.stile_b)+1 if st.session_state.stile_b in opzioni_s else 0))
-    
     nuovi_litri = c3.number_input("LITRI", value=float(st.session_state.litri_f), step=1.0)
     st.session_state.data_imb = c4.date_input("DATA IMB.", value=st.session_state.data_imb)
 
@@ -900,33 +624,37 @@ elif st.session_state.pagina == "Editor":
     bjcp_limits = {"og": (0,0), "fg": (0,0), "ibu": (0,0), "ebc": (0,0), "abv": (0,0)}
     vol_default = 2.3
     
-    if st.session_state.stile_b and not df_s_m.empty:
-        s_info = df_s_m[df_s_m["Stile"] == st.session_state.stile_b].iloc[0]
-        
-        def to_std(v):
-            val = float(v)
-            if val > 1000: return val / 1000
-            if val > 1: return 1 + (val / 1000)
-            return val
+    if st.session_state.stile_b and not df_s_m.empty and "Stile" in df_s_m.columns:
+        s_match = df_s_m[df_s_m["Stile"] == st.session_state.stile_b]
+        if not s_match.empty:
+            s_info = s_match.iloc[0]
+            def to_std(v):
+                try:
+                    val = float(v)
+                    if val > 1000: return val / 1000
+                    if val > 1: return 1 + (val / 1000)
+                    return val
+                except: return 0.0
 
-        bjcp_limits = {
-            "og": (to_std(s_info.get('OG_min', 0)), to_std(s_info.get('OG_max', 0))),
-            "fg": (to_std(s_info.get('FG_min', 0)), to_std(s_info.get('FG_max', 0))),
-            "ibu": (float(s_info.get('IBU_min', 0)), float(s_info.get('IBU_max', 0))),
-            "ebc": (float(s_info.get('EBC_min', 0)), float(s_info.get('EBC_max', 0))),
-            "abv": (float(s_info.get('ABV_min', 0)), float(s_info.get('ABV_max', 0))),
-        }
-        vol_default = float(s_info.get('Vol_CO2', s_info.get('Volumi', 2.3)))
+            bjcp_limits = {
+                "og": (to_std(s_info.get('OG_min', 0)), to_std(s_info.get('OG_max', 0))),
+                "fg": (to_std(s_info.get('FG_min', 0)), to_std(s_info.get('FG_max', 0))),
+                "ibu": (float(s_info.get('IBU_min', 0) or 0), float(s_info.get('IBU_max', 0) or 0)),
+                "ebc": (float(s_info.get('EBC_min', 0) or 0), float(s_info.get('EBC_max', 0) or 0)),
+                "abv": (float(s_info.get('ABV_min', 0) or 0), float(s_info.get('ABV_max', 0) or 0)),
+            }
+            try: vol_default = float(s_info.get('Vol_CO2', s_info.get('Volumi', 2.3)))
+            except: vol_default = 2.3
 
     costo_tot = 0.0
     for f in st.session_state.f_list:
         m_mag = mag["Fermentabili"].get(f['nome'], {})
-        q_ref = m_mag.get('qta_iniziale', m_mag.get('qta', 1))
+        q_ref = m_mag.get('qta', 1)
         costo_tot += (m_mag.get('prezzo', 0) / q_ref) * f['kg'] if q_ref > 0 else 0
         
     for l in st.session_state.l_list:
         l_mag = mag["Luppoli"].get(l['nome'], {})
-        q_ref = l_mag.get('qta_iniziale', l_mag.get('qta', 1))
+        q_ref = l_mag.get('qta', 1)
         costo_tot += (l_mag.get('prezzo', 0) / q_ref) * l['grammi'] if q_ref > 0 else 0
         
     if st.session_state.yeast_sel:
@@ -971,152 +699,284 @@ elif st.session_state.pagina == "Editor":
         </div></div>""", unsafe_allow_html=True)
 
     t1, t2, t3, t4 = st.tabs(["🌾 FERMENTABILI", "🌿 LUPPOLI", "🧫 LIEVITO", "🌡️ MASH"])
+    
+    lista_f = sorted(df_f_m["Fermentabile"].dropna().tolist()) if not df_f_m.empty and "Fermentabile" in df_f_m.columns else []
+    lista_l = sorted(df_l_m["Luppolo"].dropna().tolist()) if not df_l_m.empty and "Luppolo" in df_l_m.columns else []
+    lista_y = sorted(df_y_m["Lievito"].dropna().tolist()) if not df_y_m.empty and "Lievito" in df_y_m.columns else []
 
     with t1:
         f1, f2 = st.columns([3, 1])
-        s_f = f1.selectbox("MALTO", [""] + sorted(df_f_m["Fermentabile"].tolist()), key="sel_f_ed")
+        s_f = f1.selectbox("MALTO", [""] + lista_f, key="sel_f_ed")
         k_f = f2.number_input("Kg", min_value=0.0, step=0.1, key="qta_f_ed")
-        
         if st.button("➕ Aggiungi Malto") and s_f and k_f > 0:
             d = df_f_m[df_f_m["Fermentabile"] == s_f].iloc[0]
-            st.session_state.f_list.append({
-                'nome': s_f, 
-                'kg': k_f, 
-                'ppg': float(d['PPG']),
-                'ebc': float(d['EBC'])
-            })
+            st.session_state.f_list.append({'nome': s_f, 'kg': k_f, 'ppg': float(d['PPG']), 'ebc': float(d['EBC'])})
             st.rerun()
-
-        for idx, item in enumerate(st.session_state.f_list):
-            c_f1, c_f2 = st.columns([0.85, 0.15])
-            c_f1.write(f"• **{item['nome']}**: {item['kg']} kg")
-            if c_f2.button("🗑️", key=f"del_f_lst_{idx}"):
-                st.session_state.f_list.pop(idx)
-                st.rerun()
+        for i, it in enumerate(st.session_state.f_list):
+            c = st.columns([0.9, 0.1]); c[0].markdown(f'<div class="ingrediente-box">{it["nome"]} - {it["kg"]:.2f}kg</div>', unsafe_allow_html=True)
+            if c[1].button("❌", key=f"del_f_{i}"): st.session_state.f_list.pop(i); st.rerun()
 
     with t2:
-        l1, l2, l3, l4 = st.columns([2, 1, 1, 1])
-        s_l = l1.selectbox("LUPPOLO", [""] + sorted(df_l_m["Luppolo"].tolist()), key="sel_l_ed")
-        g_l = l2.number_input("Grammi", min_value=0.0, step=5.0, key="qta_l_ed")
-        tipo_l = l3.selectbox("Tipo", ["Boil", "Hopstand", "Dry Hop"], key="tipo_l_ed")
-        tempo_l = l4.number_input("Minuti/Giorni", min_value=0, step=1, key="tempo_l_ed")
+        l1, l2, l3 = st.columns([2, 1, 1])
+        s_l = l1.selectbox("LUPPOLO", [""] + lista_l, key="sel_l_ed")
+        g_l = l2.number_input("Grammi", step=1.0, key="qta_l_ed")
+        t_l = l3.selectbox("Modalità", ["Boil", "Hopstand", "Dry Hop"], key="mod_l_ed")
+        
+        c_val1, _ = st.columns(2)
+        val_p = 60
+        if t_l == "Boil": val_p = c_val1.number_input("Minuti", value=60, key="v_boil")
+        elif t_l == "Hopstand": val_p = c_val1.number_input("Temp °C", value=80, key="v_hop")
+        else: val_p = c_val1.number_input("Giorni", value=3, key="v_dry")
 
         if st.button("➕ Aggiungi Luppolo") and s_l and g_l > 0:
             d = df_l_m[df_l_m["Luppolo"] == s_l].iloc[0]
-            st.session_state.l_list.append({
-                'nome': s_l,
-                'grammi': g_l,
-                'aa': float(d['Alpha_Acid']),
-                'tipo': tipo_l,
-                'valore_tempo': tempo_l
-            })
+            st.session_state.l_list.append({'nome': s_l, 'grammi': g_l, 'tipo': t_l, 'valore_tempo': val_p, 'aa': float(d['Alfa acidi (%)'])})
             st.rerun()
-
-        for idx, item in enumerate(st.session_state.l_list):
-            c_l1, c_l2 = st.columns([0.85, 0.15])
-            c_l1.write(f"• **{item['nome']}**: {item['grammi']}g ({item['tipo']} - {item['valore_tempo']} min/gg)")
-            if c_l2.button("🗑️", key=f"del_l_lst_{idx}"):
-                st.session_state.l_list.pop(idx)
-                st.rerun()
+        for i, it in enumerate(st.session_state.l_list):
+            c = st.columns([0.9, 0.1]); suf = "min" if it['tipo']=="Boil" else ("°C" if it['tipo']=="Hopstand" else "gg")
+            c[0].markdown(f'<div class="ingrediente-box"><b>{it["tipo"]}</b>: {it["nome"]} {it["grammi"]:.0f}g @ {it["valore_tempo"]}{suf}</div>', unsafe_allow_html=True)
+            if c[1].button("🗑️", key=f"del_l_{i}"): st.session_state.l_list.pop(i); st.rerun()
 
     with t3:
-        y_sel = st.selectbox("LIEVITO", [""] + sorted(df_y_m["Lievito"].tolist()), key="sel_y_ed")
-        if st.button("Setta Lievito") and y_sel:
-            d = df_y_m[df_y_m["Lievito"] == y_sel].iloc[0]
-            st.session_state.yeast_sel = {
-                'nome': y_sel,
-                'attenuazione': float(d.get('Attenuazione', 75))
-            }
-            st.rerun()
-
-        if st.session_state.yeast_sel:
-            st.write(f"• **Selezionato**: {st.session_state.yeast_sel['nome']}")
+        sel_y = st.selectbox("LIEVITO", [""] + lista_y)
+        if st.button("CONFERMA LIEVITO") and sel_y:
+            dy = df_y_m[df_y_m["Lievito"] == sel_y].iloc[0]
+            st.session_state.yeast_sel = {'nome': sel_y, 'attenuazione': float(dy['Attenuazione (%)'])}; st.rerun()
+        if st.session_state.yeast_sel: st.info(f"Selezionato: {st.session_state.yeast_sel['nome']}")
 
     with t4:
-        m1, m2 = st.columns(2)
-        temp_m = m1.number_input("Temperatura (°C)", min_value=30, max_value=100, value=65)
-        tempo_m = m2.number_input("Tempo (Minuti)", min_value=1, value=60)
-        if st.button("➕ Aggiungi Step Mash"):
-            st.session_state.m_list.append({'temp': temp_m, 'tempo': tempo_m})
+        m1, m2 = st.columns(2); tm, tmin = m1.number_input("Temp °C", value=65), m2.number_input("Minuti", value=60)
+        if st.button("➕ Step Mash"): st.session_state.m_list.append({'temp': tm, 'tempo': tmin}); st.rerun()
+        for i, s_mash in enumerate(st.session_state.m_list):
+            c = st.columns([0.9, 0.1]); c[0].markdown(f'<div class="ingrediente-box">{s_mash["temp"]}°C per {s_mash["tempo"]} min</div>', unsafe_allow_html=True)
+            if c[1].button("🗑️", key=f"del_m_{i}"): st.session_state.m_list.pop(i); st.rerun()
+
+    st.divider(); st.subheader("🍬 CALCOLO ZUCCHERO DI PRIMING")
+    col_p1, col_p2, col_p3 = st.columns(3)
+    v_co2 = col_p1.number_input("Vol CO2", value=vol_default, step=0.1)
+    t_fer = col_p2.number_input("Temp Max (°C)", value=20.0)
+    l_net = col_p3.number_input("Litri netti", value=float(st.session_state.litri_f - 2.0))
+    
+    zuc = max(0.0, (v_co2 - (1.57 * pow(0.982, t_fer))) * 4.0 * l_net)
+    
+    st.markdown(f"""<div class="calc-box" style="background-color: #4A90E2; color: white !important;"><div style="display:flex; justify-content:space-around; text-align:center;">
+            <div><div class="metric-label" style="color:white !important;">Zucchero Totale</div><div class="metric-value" style="color:white !important;">{zuc:.1f} g</div></div>
+            <div><div class="metric-label" style="color:white !important;">Gr/Litro</div><div class="metric-value" style="color:white !important;">{(zuc/l_net if l_net>0 else 0):.2f} g/L</div></div>
+        </div></div>""", unsafe_allow_html=True)
+
+    st.divider(); st.subheader("🍾 PIANIFICAZIONE IMBOTTIGLIAMENTO")
+    try:
+        b75, b66, b50, scolo = calcola_ripartizione_bottiglie(l_net)
+        q75, q66, q50 = b75 // 3, b66 // 3, b50 // 3
+        cb1, cb2, cb3, cb4 = st.columns(4)
+        cb1.metric("0.75 L", f"{b75}", delta=f"{q75} a testa")
+        cb2.metric("0.66 L", f"{b66}", delta=f"{q66} a testa")
+        cb3.metric("0.50 L", f"{b50}", delta=f"{q50} a testa")
+        cb4.metric("RESIDUO", f"{scolo:.2f} L")
+    except:
+        st.warning("Errore calcolo bottiglie.")
+
+    st.divider(); col_salva, col_carrello, col_scarica = st.columns(3)
+    if col_salva.button("💾 SALVA IN ARCHIVIO GSHEETS", use_container_width=True):
+        salva_ricetta_gsheets(st.session_state.nome_b, st.session_state.stile_b, st.session_state.data_imb, st.session_state.litri_f, st.session_state.f_list, st.session_state.l_list, st.session_state.yeast_sel, st.session_state.m_list, st.session_state.og_reale, st.session_state.fg_reale, st.session_state.abv_reale)
+        st.toast("Salvata su Google Sheets!")
+    
+    if col_carrello.button("🛒 AGGIUNGI AL CARRELLO", use_container_width=True):
+        tutti = st.session_state.f_list + st.session_state.l_list
+        if st.session_state.yeast_sel: tutti.append({'nome': st.session_state.yeast_sel['nome'], 'lievito': True})
+        aggiungi_a_shopping_list(tutti); st.success("Aggiunti al carrello Google Sheets!")
+    
+    if col_scarica.button("🍺 SCARICA DAL MAGAZZINO", type="primary", use_container_width=True):
+        for f_item in st.session_state.f_list: aggiorna_scorta("Fermentabili", f_item['nome'], f_item['kg'], operazione="sub")
+        for l_item in st.session_state.l_list: aggiorna_scorta("Luppoli", l_item['nome'], l_item['grammi'], operazione="sub")
+        if st.session_state.yeast_sel: aggiorna_scorta("Lieviti", st.session_state.yeast_sel['nome'], 1, operazione="sub")
+        st.success("Magazzino Google Sheets aggiornato!")
+    
+    st.divider()
+    cd1, cd2 = st.columns(2)
+    with cd1:
+        pdf_ricetta = genera_pdf_ricetta(
+            st.session_state.nome_b, st.session_state.stile_b, st.session_state.litri_f, 
+            og, fg, abv, ibu, ebc, a_m, a_s, st.session_state.f_list, st.session_state.l_list, 
+            st.session_state.yeast_sel, st.session_state.m_list
+        )
+        st.download_button(label="📄 SCHEDA PDF", data=pdf_ricetta, file_name=f"Scheda_{st.session_state.nome_b}.pdf", mime="application/pdf", use_container_width=True)
+    
+    with cd2:
+        pdf_etichette = genera_pdf_etichette(st.session_state.nome_b, st.session_state.stile_b, st.session_state.abv_reale, st.session_state.data_imb.strftime("%d/%m/%Y"))
+        st.download_button("🏷️ ETICHETTE PDF", data=pdf_etichette, file_name=f"Etichette_{st.session_state.nome_b}.pdf", mime="application/pdf", use_container_width=True)
+
+# --- 10. PAGINA AGENTE AI (AIGOR) ---
+elif st.session_state.pagina == "AIGOR":   
+    nome_agente = "AIgor" 
+    st.markdown(f"""
+        <div style="text-align: center; padding: 10px; border-radius: 10px; background-color: #ffd700; margin-bottom: 20px;">
+            <h1 style="color: #000000; margin: 0;">🤖 {nome_agente}</h1>
+            <p style="color: #000000; font-weight: bold; margin: 0;">L'INTELLIGENZA DEI SONS OF BREWERY</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.info(f"Ciao sono {nome_agente}. Fammi vedere cosa hai in magazzino e vediamo che birra possiamo tirar fuori.")
+    
+    if not api_key:
+        st.error("⚠️ Chiave API non trovata nei Secrets o nel file key_gemini.txt!")
+        st.stop()
+
+    mag = carica_magazzino_dict()
+
+    with st.container(border=True):
+        st.subheader("🎯 Parametri di Ottimizzazione")
+        c1, c2 = st.columns(2)
+        with c1:
+            direzioni = st.multiselect(
+                "Direzioni Aromatiche desiderate:",
+                options=["Luppolata/Tropicale", "Maltata/Dolce", "Tostata/Torrefatta", "Belga/Speziata", "Classica/Pilsner", "Strong/Alcolica"]
+            )
+            solo_lievito = st.toggle("Usa solo lieviti in magazzino", value=True)
+        
+        with c2:
+            abv_range = st.select_slider(
+                "Range Alcolico desiderato (ABV %)",
+                options=[f"{x/10:.1f}" for x in range(30, 130, 5)],
+                value=("4.5", "7.5")
+            )
+            priorita = st.radio("Priorità:", ["Svuota più magazzino possibile", "Massima fedeltà allo stile"], horizontal=True)
+
+    if st.button("🚀 GENERA STRATEGIA RICETTE", use_container_width=True):
+        scorte_info = ""
+        for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
+            scorte_info += f"\n{cat.upper()}:\n"
+            for n, d in mag.get(cat, {}).items():
+                u = "kg" if cat=="Fermentabili" else "g" if cat=="Luppoli" else "unità"
+                scorte_info += f"- {n}: {d['qta']} {u}\n"
+
+        prompt_sistema = f"""
+        Sei {nome_agente}, un homebrewer esperto dei Sons of Brewery.
+        SCORTE ATTUALI DA GOOGLE SHEETS: {scorte_info}
+        
+        PARAMETRI TECNICI:
+        - Direzioni: {', '.join(direzioni) if direzioni else 'Fai tu'}
+        - Vincolo Lievito: {solo_lievito}
+        - Range ABV: {abv_range[0]}% - {abv_range[1]}%
+        - Strategia: {priorita}
+        
+        REGOLE DI RISPOSTA:
+        1. Vai dritto al punto.
+        2. Presenta la RICETTA COMPLETA (23L) in un unico blocco tecnico.
+        3. Per ogni ingrediente indica cosa c'è in magazzino e cosa va comprato.
+        4. "NOTE RAPIDE" solo per Mash, Luppolatura e Lievito.
+        """
+        
+        with st.spinner("AIGOR sta elaborando..."):
+            try:
+                model = genai.GenerativeModel("gemini-2.5-flash")
+                response = model.generate_content(prompt_sistema)
+                st.session_state.chat_history = [{"role": "assistant", "content": response.text}]
+            except Exception as e:
+                st.error(f"Errore: {e}")
+
+    st.divider()
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if prompt_utente := st.chat_input("Chiedi modifiche ad AIGOR"):
+        st.session_state.chat_history.append({"role": "user", "content": prompt_utente})
+        with st.chat_message("user"): st.markdown(prompt_utente)
+        
+        with st.chat_message("assistant"):
+            with st.spinner("Ricalcolo in corso..."):
+                model = genai.GenerativeModel("gemini-2.5-flash")
+                context_with_query = f"Magazzino attuale: {mag}. Storico chat: {st.session_state.chat_history}. Domanda: {prompt_utente}"
+                response = model.generate_content(context_with_query)
+                st.markdown(response.text)
+                st.session_state.chat_history.append({"role": "assistant", "content": response.text})
+
+    if st.session_state.chat_history:
+        if st.button("🗑️ Reset Analisi"):
+            st.session_state.chat_history = []
             st.rerun()
 
-        for idx, item in enumerate(st.session_state.m_list):
-            c_m1, c_m2 = st.columns([0.85, 0.15])
-            c_m1.write(f"• {item['temp']}°C per {item['tempo']} min")
-            if c_m2.button("🗑️", key=f"del_m_lst_{idx}"):
-                st.session_state.m_list.pop(idx)
-                st.rerun()
-
-    st.divider()
+# --- 11. PAGINA DATABASE GSHEETS ---
+elif st.session_state.pagina == "Database":
+    st.title("🗄️ Gestione Database Google Sheets")
     
-    col_act1, col_act2, col_act3 = st.columns(3)
-    
-    if col_act1.button("💾 SALVA IN ARCHIVIO GSHEETS", use_container_width=True):
-        salva_su_file(
-            st.session_state.nome_b,
-            st.session_state.stile_b,
-            st.session_state.data_imb,
-            st.session_state.litri_f,
-            st.session_state.f_list,
-            st.session_state.l_list,
-            st.session_state.yeast_sel,
-            st.session_state.m_list,
-            st.session_state.og_reale,
-            st.session_state.fg_reale,
-            st.session_state.abv_reale
-        )
-        st.success("Ricetta salvata con successo su Google Sheets!")
+    tab_db1, tab_db2, tab_db3, tab_db4 = st.tabs(["🌾 Fermentabili", "🌿 Luppoli", "🧫 Lieviti", "🏆 Stili BJCP"])
 
-    if col_act2.button("🛒 AGGIUNGI A CARRELLO", use_container_width=True):
-        ingr_totali = st.session_state.f_list + st.session_state.l_list
-        if st.session_state.yeast_sel:
-            ingr_totali.append(st.session_state.yeast_sel)
-        aggiungi_a_shopping_list(ingr_totali)
-        st.success("Ingredienti aggiunti al carrello!")
+    with tab_db1:
+        st.subheader("Aggiungi Malto a Google Sheets")
+        with st.form("form_malti"):
+            nome_f = st.text_input("Nome Malto")
+            c1, c2 = st.columns(2)
+            ppg_f = c1.number_input("PPG", value=36.0)
+            ebc_f = c2.number_input("EBC", value=10.0)
+            if st.form_submit_button("REGISTRA MALTO"):
+                if nome_f:
+                    nuovo = pd.DataFrame([{"Fermentabile": nome_f, "PPG": ppg_f, "EBC": ebc_f}])
+                    df_updated = pd.concat([df_f_m, nuovo], ignore_index=True).drop_duplicates(subset="Fermentabile")
+                    salva_foglio("Database_Malti", df_updated)
+                    st.success(f"{nome_f} salvato su Google Sheets!")
+                    st.rerun()
+        st.dataframe(df_f_m, use_container_width=True, hide_index=True)
 
-    if col_act3.button("⚡ SCALA DA MAGAZZINO", use_container_width=True):
-        for f in st.session_state.f_list:
-            aggiorna_scorta("Fermentabili", f['nome'], f['kg'], operazione="sub")
-        for l in st.session_state.l_list:
-            aggiorna_scorta("Luppoli", l['nome'], l['grammi'], operazione="sub")
-        if st.session_state.yeast_sel:
-            aggiorna_scorta("Lieviti", st.session_state.yeast_sel['nome'], 1, operazione="sub")
-        st.success("Quantità scalate dal magazzino!")
+    with tab_db2:
+        st.subheader("Aggiungi Luppolo a Google Sheets")
+        with st.form("form_luppoli"):
+            nome_l = st.text_input("Nome Luppolo")
+            c_l1, c_l2 = st.columns(2)
+            aa_l = c_l1.number_input("Alfa Acidi (%)", value=5.0)
+            tipo_l = c_l2.selectbox("Tipo Luppolo", ["Amaro", "Aroma", "Duale"])
+            if st.form_submit_button("REGISTRA LUPPOLO"):
+                if nome_l:
+                    nuovo_l = pd.DataFrame([{"Luppolo": nome_l, "Alfa acidi (%)": aa_l, "Tipo": tipo_l}])
+                    df_updated_l = pd.concat([df_l_m, nuovo_l], ignore_index=True).drop_duplicates(subset="Luppolo")
+                    salva_foglio("Database_Luppoli", df_updated_l)
+                    st.success(f"{nome_l} salvato su Google Sheets!")
+                    st.rerun()
+        st.dataframe(df_l_m, use_container_width=True, hide_index=True)
 
-    st.divider()
-    st.subheader("📄 ESPORTAZIONE PDF")
-    
-    pdf_ricetta_bytes = genera_pdf_ricetta(
-        st.session_state.nome_b,
-        st.session_state.stile_b,
-        st.session_state.litri_f,
-        og, fg, abv, ibu, ebc, a_m, a_s,
-        st.session_state.f_list,
-        st.session_state.l_list,
-        st.session_state.yeast_sel,
-        st.session_state.m_list
-    )
-    
-    pdf_etichette_bytes = genera_pdf_etichette(
-        st.session_state.nome_b,
-        st.session_state.stile_b,
-        abv,
-        st.session_state.data_imb
-    )
+    with tab_db3:
+        st.subheader("Aggiungi Lievito a Google Sheets")
+        with st.form("form_lieviti"):
+            nome_y = st.text_input("Nome Lievito")
+            att_y = st.number_input("Attenuazione (%)", value=75.0)
+            if st.form_submit_button("REGISTRA LIEVITO"):
+                if nome_y:
+                    nuovo_y = pd.DataFrame([{"Lievito": nome_y, "Attenuazione (%)": att_y}])
+                    df_updated_y = pd.concat([df_y_m, nuovo_y], ignore_index=True).drop_duplicates(subset="Lievito")
+                    salva_foglio("Database_Lieviti", df_updated_y)
+                    st.success(f"{nome_y} salvato su Google Sheets!")
+                    st.rerun()
+        st.dataframe(df_y_m, use_container_width=True, hide_index=True)
 
-    pdf_col1, pdf_col2 = st.columns(2)
-    pdf_col1.download_button(
-        label="📥 DOWNLOAD SCHEDA COTTA (PDF)",
-        data=pdf_ricetta_bytes,
-        file_name=f"Scheda_{st.session_state.nome_b}.pdf",
-        mime="application/pdf",
-        use_container_width=True
-    )
-    
-    pdf_col2.download_button(
-        label="🏷️ DOWNLOAD ETICHETTE (PDF)",
-        data=pdf_etichette_bytes,
-        file_name=f"Etichette_{st.session_state.nome_b}.pdf",
-        mime="application/pdf",
-        use_container_width=True
-    )
+    with tab_db4:
+        st.subheader("Aggiungi Stile BJCP a Google Sheets")
+        with st.form("form_stili"):
+            nome_s = st.text_input("Nome Stile (es: American IPA)")
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
+            
+            og_min = c1.number_input("OG Min", value=1.040, format="%.3f")
+            og_max = c1.number_input("OG Max", value=1.050, format="%.3f")
+            fg_min = c2.number_input("FG Min", value=1.008, format="%.3f")
+            fg_max = c2.number_input("FG Max", value=1.012, format="%.3f")
+            ibu_min = c3.number_input("IBU Min", value=20.0, step=1.0)
+            ibu_max = c3.number_input("IBU Max", value=40.0, step=1.0)
+            ebc_min = c4.number_input("EBC Min", value=5.0, step=1.0)
+            ebc_max = c4.number_input("EBC Max", value=15.0, step=1.0)
+            abv_min = c5.number_input("ABV Min %", value=4.5, step=0.1, format="%.1f")
+            abv_max = c5.number_input("ABV Max %", value=6.0, step=0.1, format="%.1f")
+            vol_co2 = c6.number_input("Vol. CO2", value=2.4, step=0.1, format="%.1f")
+            
+            if st.form_submit_button("REGISTRA NUOVO STILE"):
+                if nome_s:
+                    nuovo_s = pd.DataFrame([{
+                        "Stile": nome_s, "OG_min": og_min, "OG_max": og_max,
+                        "FG_min": fg_min, "FG_max": fg_max, "IBU_min": ibu_min,
+                        "IBU_max": ibu_max, "EBC_min": ebc_min, "EBC_max": ebc_max,
+                        "ABV_min": abv_min, "ABV_max": abv_max, "Vol_CO2": vol_co2
+                    }])
+                    df_updated_s = pd.concat([df_s_m, nuovo_s], ignore_index=True).drop_duplicates(subset="Stile")
+                    salva_foglio("Database_Stili", df_updated_s)
+                    st.success(f"{nome_s} salvato su Google Sheets!")
+                    st.rerun()
+        st.dataframe(df_s_m, use_container_width=True, hide_index=True)
