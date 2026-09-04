@@ -22,7 +22,7 @@ def get_gspread_client():
     try:
         if "gcp_service_account" in st.secrets:
             creds = Credentials.from_service_account_info(
-                st.secrets["gcp_service_account"],
+                dict(st.secrets["gcp_service_account"]),
                 scopes=SCOPES
             )
             return gspread.authorize(creds)
@@ -38,26 +38,25 @@ def get_gspread_client():
         st.error(f"Errore di autenticazione GSpread: {e}")
         return None
 
-gc = get_gspread_client()
-
 def get_spreadsheet():
-    """Recupera l'oggetto Spreadsheet da URL o Nome salvato neiSecrets."""
+    """Recupera l'oggetto Spreadsheet da URL, Key o Nome dal file Google Drive."""
+    gc = get_gspread_client()
     if not gc:
         return None
     try:
-        # Se presente nei secrets connections.gsheets.spreadsheet
-        if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
-            url_or_name = st.secrets["connections"]["gsheets"]["spreadsheet"]
-            if url_or_name.startswith("http"):
-                return gc.open_by_url(url_or_name)
-            return gc.open(url_or_name)
-        # Fallback al nome del file su Google Drive
+        # 1. Se hai l'URL esplicito nei Secrets
+        if "SPREADSHEET_URL" in st.secrets:
+            return gc.open_by_url(st.secrets["SPREADSHEET_URL"])
+        
+        # 2. Se hai l'ID dello Sheet nei Secrets (es. SPREADSHEET_ID = "1aB2c3...")
+        if "SPREADSHEET_ID" in st.secrets:
+            return gc.open_by_key(st.secrets["SPREADSHEET_ID"])
+
+        # 3. Fallback: apre per nome del file su Google Drive
         return gc.open("SonsOfBrewery_DB")
     except Exception as e:
         st.error(f"Impossibile aprire il foglio Google: {e}")
         return None
-
-sh = get_spreadsheet()
 
 # --- CARICAMENTO API KEY GEMINI (MODALITÀ SICURA) ---
 def get_api_key():
