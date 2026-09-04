@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import math
+import ast
 from datetime import date
 from fpdf import FPDF 
 import google.generativeai as genai
@@ -159,8 +160,6 @@ def aggiungi_a_shopping_list(ingredienti_ricetta):
         mag["shopping_list"][cat][nome] = attuale + qta_necessaria
     salva_magazzino_dict(mag)
 
-import json
-
 def salva_ricetta_gsheets(nome, stile, data_imb, litri, fermentabili, luppoli, yeast, mash_steps, og_r, fg_r, abv_r):
     df_arc = leggi_foglio("Archivio_Ricette")
     nuova_row = {
@@ -169,10 +168,10 @@ def salva_ricetta_gsheets(nome, stile, data_imb, litri, fermentabili, luppoli, y
         "DataImbottigliamento": str(data_imb),
         "Litri": litri,
         "DataCreazione": str(date.today()),
-        "Fermentabili": json.dumps(fermentabili),
-        "Luppoli": json.dumps(luppoli),
-        "Lievito": json.dumps(yeast) if yeast else "",
-        "MashSteps": json.dumps(mash_steps),
+        "Fermentabili": str(fermentabili),
+        "Luppoli": str(luppoli),
+        "Lievito": str(yeast) if yeast else "",
+        "MashSteps": str(mash_steps),
         "OG_Reale": og_r,
         "FG_Reale": fg_r,
         "ABV_Reale": abv_r
@@ -197,13 +196,15 @@ def carica_archivio_dict():
         for _, r in df_arc.iterrows():
             nome = r.get("Nome")
             if nome:
-                try: f_list = json.loads(r.get("Fermentabili", "[]"))
+                try: f_list = ast.literal_eval(str(r.get("Fermentabili", "[]")))
                 except: f_list = []
-                try: l_list = json.loads(r.get("Luppoli", "[]"))
+                try: l_list = ast.literal_eval(str(r.get("Luppoli", "[]")))
                 except: l_list = []
-                try: m_list = json.loads(r.get("MashSteps", "[]"))
+                try: m_list = ast.literal_eval(str(r.get("MashSteps", "[]")))
                 except: m_list = []
-                try: y_sel = json.loads(r.get("Lievito", "null"))
+                try: 
+                    y_val = str(r.get("Lievito", "")).strip()
+                    y_sel = ast.literal_eval(y_val) if y_val and y_val != "nan" else None
                 except: y_sel = None
                 
                 archivio[nome] = {
