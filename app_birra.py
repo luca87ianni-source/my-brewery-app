@@ -7,10 +7,57 @@ from datetime import date
 from fpdf import FPDF 
 from google import genai
 from google.genai import types
-from streamlit_gsheets import StConnection
+import gspread
+from google.oauth2.service_account import Credentials
 
-# --- INIZIALIZZAZIONE CONNESSIONE GSHEETS ---
-conn = st.connection("gsheets", type=StConnection)
+# --- INIZIALIZZAZIONE CONNESSIONE GSHEETS TRAMITE GSPREAD ---
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+@st.cache_resource
+def get_gspread_client():
+    """Inizializza e autentica il client gspread usando i Secrets di Streamlit."""
+    try:
+        if "gcp_service_account" in st.secrets:
+            creds = Credentials.from_service_account_info(
+                st.secrets["gcp_service_account"],
+                scopes=SCOPES
+            )
+            return gspread.authorize(creds)
+        elif os.path.exists("service_account.json"):
+            creds = Credentials.from_service_account_file(
+                "service_account.json",
+                scopes=SCOPES
+            )
+            return gspread.authorize(creds)
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Errore di autenticazione GSpread: {e}")
+        return None
+
+gc = get_gspread_client()
+
+def get_spreadsheet():
+    """Recupera l'oggetto Spreadsheet da URL o Nome salvato neiSecrets."""
+    if not gc:
+        return None
+    try:
+        # Se presente nei secrets connections.gsheets.spreadsheet
+        if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
+            url_or_name = st.secrets["connections"]["gsheets"]["spreadsheet"]
+            if url_or_name.startswith("http"):
+                return gc.open_by_url(url_or_name)
+            return gc.open(url_or_name)
+        # Fallback al nome del file su Google Drive
+        return gc.open("SonsOfBrewery_DB")
+    except Exception as e:
+        st.error(f"Impossibile aprire il foglio Google: {e}")
+        return None
+
+sh = get_spreadsheet()
 
 # --- CARICAMENTO API KEY GEMINI (MODALITÀ SICURA) ---
 def get_api_key():
@@ -50,7 +97,7 @@ if 'og_reale' not in st.session_state: st.session_state.og_reale = 1.050
 if 'fg_reale' not in st.session_state: st.session_state.fg_reale = 1.010
 if 'abv_reale' not in st.session_state: st.session_state.abv_reale = 5.5
 
-# --- 2. GESTIONE DATI (JSON LOCALI + GOOGLE SHEETS) ---
+# --- 2. GESTIONE DATI (JSON LOCALI + GOOGLE SHEETS VIA GSPREAD) ---
 
 @st.cache_data
 def carica_db(tipo):
@@ -85,23 +132,59 @@ def salva_db(tipo, dati):
 
 # --- FUNZIONI GOOGLE SHEETS FOR MAGAZZINO, SHOPPING LIST E ARCHIVIO ---
 
-def carica_magazzino():
-    """Legge la scheda 'Magazzino' da Google Sheets e la adatta al dizionario dell'app."""
+def read_worksheet_df(worksheet_name):
+    """Helper per leggere un foglio Google e restituirlo come DataFrame Pandas"""
+    if not sh:
+        return pd.DataFrame()
     try:
-        df = conn.read(worksheet="Magazzino", ttl=5)
+        ws = sh.worksheet(worksheet_name)
+        records = ws.get_all_records()
+        return pd.DataFrame(records)
+    except Exception as e:
+        return pd.DataFrame()
+
+def write_worksheet_df(worksheet_name, df):
+    """Helper per sovrascrivere un intero foglio Google con un DataFrame Pandas"""
+    if not sh:
+        return
+    try:
+        try:
+            ws = sh.worksheet(worksheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title=worksheet_name, rows="100", cols="20")
+        
+        ws.clear()
+        # Converte il DataFrame in lista di liste includendo l'intestazione
+        data = [df.columns.values.tolist()] + df.fillna("").astype(str).values.tolist()
+        ws.update("A1", data)
+    except Exception as e:
+        st.error(f"Errore nel salvataggio del foglio {worksheet_name}: {e}")
+
+def carica_magazzino():
+    """Legge la scheda 'Magazzino' da Google Sheets via gspread."""
+    try:
+        df = read_worksheet_df("Magazzino")
         mag = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {}}
         
         if not df.empty:
             for _, row in df.iterrows():
                 cat = row.get("Categoria")
                 nome = row.get("Nome")
-                if cat in ["Fermentabili", "Luppoli", "Lieviti"] and pd.notna(nome):
+                if cat in ["Fermentabili", "Luppoli", "Lieviti"] and pd.notna(nome) and str(nome).strip():
+                    try:
+                        qta_val = float(row.get("Quantita", 0.0))
+                    except (ValueError, TypeError):
+                        qta_val = 0.0
+                    try:
+                        prezzo_val = float(row.get("Prezzo", 0.0))
+                    except (ValueError, TypeError):
+                        prezzo_val = 0.0
+                    
                     mag[cat][str(nome)] = {
-                        "qta": float(row.get("Quantita", 0.0)),
-                        "prezzo": float(row.get("Prezzo", 0.0))
+                        "qta": qta_val,
+                        "prezzo": prezzo_val
                     }
         
-        # Carica contestualmente la shopping list per completare l'oggetto magazzino
         mag["shopping_list"] = carica_shopping_list_dict()
         return mag
     except Exception as e:
@@ -109,7 +192,7 @@ def carica_magazzino():
         return {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {}}
 
 def salva_magazzino(data):
-    """Salva il Magazzino su Google Sheets mantenendo strutturate le categorie."""
+    """Salva il Magazzino su Google Sheets via gspread."""
     righe = []
     for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
         unita = "Kg" if cat == "Fermentabili" else ("g" if cat == "Luppoli" else "Unita")
@@ -123,29 +206,32 @@ def salva_magazzino(data):
             })
     
     df = pd.DataFrame(righe, columns=["Categoria", "Nome", "Quantita", "Unita", "Prezzo"])
-    conn.update(worksheet="Magazzino", data=df)
+    write_worksheet_df("Magazzino", df)
     
-    # Salva separatamente la Shopping List se presente
     if "shopping_list" in data:
         salva_shopping_list_dict(data["shopping_list"])
 
 def carica_shopping_list_dict():
-    """Helper per caricare la scheda 'Shopping_List' come dizionario interno."""
+    """Helper per caricare la scheda 'Shopping_List' via gspread."""
     try:
-        df = conn.read(worksheet="Shopping_List", ttl=5)
+        df = read_worksheet_df("Shopping_List")
         shop = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}
         if not df.empty:
             for _, row in df.iterrows():
                 cat = row.get("Categoria")
                 nome = row.get("Nome")
-                if cat in shop and pd.notna(nome):
-                    shop[cat][str(nome)] = float(row.get("Quantita", 0.0))
+                if cat in shop and pd.notna(nome) and str(nome).strip():
+                    try:
+                        qta_val = float(row.get("Quantita", 0.0))
+                    except (ValueError, TypeError):
+                        qta_val = 0.0
+                    shop[cat][str(nome)] = qta_val
         return shop
     except Exception:
         return {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}
 
 def salva_shopping_list_dict(shop_data):
-    """Helper per salvare la Shopping List su Google Sheets."""
+    """Helper per salvare la Shopping List su Google Sheets via gspread."""
     righe = []
     for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
         unita = "Kg" if cat == "Fermentabili" else ("g" if cat == "Luppoli" else "Unita")
@@ -158,18 +244,18 @@ def salva_shopping_list_dict(shop_data):
                 "Formato_Pacchetto": ""
             })
     df = pd.DataFrame(righe, columns=["Categoria", "Nome", "Quantita", "Unita", "Formato_Pacchetto"])
-    conn.update(worksheet="Shopping_List", data=df)
+    write_worksheet_df("Shopping_List", df)
 
 def carica_archivio():
-    """Carica l'Archivio Ricette da Google Sheets deserializzando le stringhe JSON."""
+    """Carica l'Archivio Ricette da Google Sheets deserializzando i dati JSON."""
     try:
-        df = conn.read(worksheet="Archivio_Ricette", ttl=5)
+        df = read_worksheet_df("Archivio_Ricette")
         if df.empty:
             return {}
         
         archivio = {}
         for _, row in df.iterrows():
-            nome = str(row.get("Nome", ""))
+            nome = str(row.get("Nome", "")).strip()
             if not nome:
                 continue
                 
@@ -181,15 +267,20 @@ def carica_archivio():
                         return []
                 return val if isinstance(val, (list, dict)) else []
 
+            try:
+                litri_val = float(row.get("Litri", 25.0))
+            except (ValueError, TypeError):
+                litri_val = 25.0
+
             archivio[nome] = {
                 "stile": str(row.get("Stile", "")),
                 "data_imbottigliamento": str(row.get("Data_Cotta", "")),
-                "litri": float(row.get("Litri", 25.0)),
+                "litri": litri_val,
                 "data": str(row.get("Data_Cotta", "")),
                 "fermentabili": da_json(row.get("Fermentabili_JSON")),
                 "luppoli": da_json(row.get("Luppoli_JSON")),
                 "yeast": da_json(row.get("Lievito")),
-                "mash_steps": da_json(row.get("Note")), # Mash/Note salvati strutturati
+                "mash_steps": da_json(row.get("Note")),
                 "og_reale": 1.050,
                 "fg_reale": 1.010,
                 "abv_reale": 5.5
@@ -200,7 +291,7 @@ def carica_archivio():
         return {}
 
 def salva_archivio(dati):
-    """Serializza e salva l'Archivio Ricette sul tab 'Archivio_Ricette' di Google Sheets."""
+    """Serializza e salva l'Archivio Ricette su Google Sheets via gspread."""
     righe = []
     for idx, (nome, d) in enumerate(dati.items(), start=1):
         righe.append({
@@ -219,7 +310,7 @@ def salva_archivio(dati):
         "ID_Ricetta", "Nome", "Stile", "Data_Cotta", "Litri", 
         "Fermentabili_JSON", "Luppoli_JSON", "Lievito", "Note"
     ])
-    conn.update(worksheet="Archivio_Ricette", data=df)
+    write_worksheet_df("Archivio_Ricette", df)
 
 def genera_contesto_aigor(mag, archivio_json):
     """Trasforma i dati in testo per l'IA"""
@@ -528,7 +619,7 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
 
     return bytes(pdf.output())
 
-# --- 5b. NUOVA FUNZIONE PDF ETICHETTE ---
+# --- 5b. FUNZIONE PDF ETICHETTE ---
 def genera_pdf_etichette(nome, stile, abv, data_imb):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
@@ -636,7 +727,7 @@ with st.sidebar:
 
 # --- 7. PAGINA MAGAZZINO ---
 if st.session_state.pagina == "Magazzino":
-    st.title("📦 Magazzino Scorte (Google Sheets)")
+    st.title("📦 Magazzino Scorte (GSpread)")
     mag = carica_magazzino()
     t1, t2, t3 = st.tabs(["Malti", "Luppoli", "Lieviti"])
     
@@ -943,7 +1034,10 @@ elif st.session_state.pagina == "Editor":
                 st.rerun()
 
     st.divider()
-    if st.button("💾 SALVA RICETTA IN ARCHIVIO GSHEETS", use_container_width=True):
+    
+    col_act1, col_act2, col_act3 = st.columns(3)
+    
+    if col_act1.button("💾 SALVA IN ARCHIVIO GSHEETS", use_container_width=True):
         salva_su_file(
             st.session_state.nome_b,
             st.session_state.stile_b,
@@ -958,3 +1052,57 @@ elif st.session_state.pagina == "Editor":
             st.session_state.abv_reale
         )
         st.success("Ricetta salvata con successo su Google Sheets!")
+
+    if col_act2.button("🛒 AGGIUNGI A CARRELLO", use_container_width=True):
+        ingr_totali = st.session_state.f_list + st.session_state.l_list
+        if st.session_state.yeast_sel:
+            ingr_totali.append(st.session_state.yeast_sel)
+        aggiungi_a_shopping_list(ingr_totali)
+        st.success("Ingredienti aggiunti al carrello!")
+
+    if col_act3.button("⚡ SCALA DA MAGAZZINO", use_container_width=True):
+        for f in st.session_state.f_list:
+            aggiorna_scorta("Fermentabili", f['nome'], f['kg'], operazione="sub")
+        for l in st.session_state.l_list:
+            aggiorna_scorta("Luppoli", l['nome'], l['grammi'], operazione="sub")
+        if st.session_state.yeast_sel:
+            aggiorna_scorta("Lieviti", st.session_state.yeast_sel['nome'], 1, operazione="sub")
+        st.success("Quantità scalate dal magazzino!")
+
+    st.divider()
+    st.subheader("📄 ESPORTAZIONE PDF")
+    
+    pdf_ricetta_bytes = genera_pdf_ricetta(
+        st.session_state.nome_b,
+        st.session_state.stile_b,
+        st.session_state.litri_f,
+        og, fg, abv, ibu, ebc, a_m, a_s,
+        st.session_state.f_list,
+        st.session_state.l_list,
+        st.session_state.yeast_sel,
+        st.session_state.m_list
+    )
+    
+    pdf_etichette_bytes = genera_pdf_etichette(
+        st.session_state.nome_b,
+        st.session_state.stile_b,
+        abv,
+        st.session_state.data_imb
+    )
+
+    pdf_col1, pdf_col2 = st.columns(2)
+    pdf_col1.download_button(
+        label="📥 DOWNLOAD SCHEDA COTTA (PDF)",
+        data=pdf_ricetta_bytes,
+        file_name=f"Scheda_{st.session_state.nome_b}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
+    
+    pdf_col2.download_button(
+        label="🏷️ DOWNLOAD ETICHETTE (PDF)",
+        data=pdf_etichette_bytes,
+        file_name=f"Etichette_{st.session_state.nome_b}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
