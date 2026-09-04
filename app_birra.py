@@ -90,83 +90,209 @@ if 'og_reale' not in st.session_state: st.session_state.og_reale = 1.050
 if 'fg_reale' not in st.session_state: st.session_state.fg_reale = 1.010
 if 'abv_reale' not in st.session_state: st.session_state.abv_reale = 5.5
 
-# --- 2. CARICAMENTO DATABASE INGREDENTI E STILI DA GSHEETS ---
-df_f_m = leggi_foglio("Database_Malti")
-df_l_m = leggi_foglio("Database_Luppoli")
-df_y_m = leggi_foglio("Database_Lieviti")
-df_s_m = leggi_foglio("Database_Stili")
-
-# --- MAPPA FILE JSON (Aggiornata con le versioni _2.json) ---
+# --- 2. CARICAMENTO DATABASE TECNICI DA FILE JSON ---
+# I database tecnici NON sono su Google Sheets: sono i file JSON versionati del progetto.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILES = {
-    "malti": "database_malti_2.json",
-    "luppoli": "database_luppoli_2.json",
-    "lieviti": "database_lieviti_2.json",
-    "stili": "database_stili_2.json",
-    "volumi": "database_volumi_2.json"
+    "malti": os.path.join(BASE_DIR, "database_malti.json"),
+    "luppoli": os.path.join(BASE_DIR, "database_luppoli.json"),
+    "lieviti": os.path.join(BASE_DIR, "database_lieviti.json"),
+    "stili": os.path.join(BASE_DIR, "database_stili.json"),
+    "volumi": os.path.join(BASE_DIR, "database_volumi.json")
 }
 
 @st.cache_data
 def carica_db(tipo):
-    """Carica i database tecnici (Malti, Luppoli, ecc.) dai file JSON"""
     f_path = DB_FILES.get(tipo)
-    if f_path and os.path.exists(f_path):
-        with open(f_path, "r", encoding='utf-8') as f:
+    if not f_path or not os.path.exists(f_path):
+        return {}
+    try:
+        with open(f_path, "r", encoding="utf-8") as f:
             dati = json.load(f)
-            # Gestione specifica per i volumi CO2: converte le chiavi di temperatura in int
-            if tipo == "volumi":
-                return {int(k): v.get("Volumi") if isinstance(v, dict) else v for k, v in dati.items()}
-            return dati
-    return {}
+        if tipo == "volumi":
+            return {int(k): (v.get("Volumi") if isinstance(v, dict) else v) for k, v in dati.items()}
+        return dati
+    except (OSError, json.JSONDecodeError) as e:
+        st.error(f"Errore caricamento database JSON '{tipo}': {e}")
+        return {}
 
 def salva_db(tipo, dati):
-    """Salva le modifiche ai database JSON e pulisce la cache di Streamlit"""
     f_path = DB_FILES.get(tipo)
-    if f_path:
-        with open(f_path, "w", encoding='utf-8') as f:
-            json.dump(dati, f, indent=4, ensure_ascii=False)
-        st.cache_data.clear()
+    if not f_path:
+        raise ValueError(f"Database non configurato: {tipo}")
+    with open(f_path, "w", encoding="utf-8") as f:
+        json.dump(dati, f, indent=4, ensure_ascii=False)
+    st.cache_data.clear()
 
-# --- CARICAMENTO DIRETTO IN MEMORIA (Sostituisce leggi_foglio) ---
+# Normalizziamo i JSON in DataFrame solo per riutilizzare la UI/calcoli esistenti.
 db_malti = carica_db("malti")
 db_luppoli = carica_db("luppoli")
 db_lieviti = carica_db("lieviti")
 db_stili = carica_db("stili")
 db_volumi = carica_db("volumi")
 
-# --- GESTIONE MAGAZZINO E ARCHIVIO (JSON Locali) ---
+df_f_m = pd.DataFrame([{"Fermentabile": n, "PPG": d.get("PPG", 0), "EBC": d.get("EBC", 0)} for n, d in db_malti.items()])
+df_l_m = pd.DataFrame([{"Luppolo": n, "Alfa acidi (%)": d.get("Alfa acidi (%)", 0), "Tipo": d.get("Tipo", "") } for n, d in db_luppoli.items()])
+df_y_m = pd.DataFrame([{"Lievito": n, "Attenuazione (%)": d.get("Attenuazione (%)", 0)} for n, d in db_lieviti.items()])
+df_s_m = pd.DataFrame([{
+    "Stile": n,
+    "OG_min": _safe_float(d.get("OG_min", 0)), "OG_max": _safe_float(d.get("OG_max", 0)),
+    "FG_min": _safe_float(d.get("FG_min", 0)), "FG_max": _safe_float(d.get("FG_max", 0)),
+    "IBU_min": _safe_float(d.get("IBU_min", 0)), "IBU_max": _safe_float(d.get("IBU_max", 0)),
+    "EBC_min": _safe_float(d.get("EBC_min", 0)), "EBC_max": _safe_float(d.get("EBC_max", 0)),
+    "ABV_min": _safe_float(d.get("ABV_min", 0)), "ABV_max": _safe_float(d.get("ABV_max", 0)),
+    "Vol_CO2": _safe_float(d.get("Volumi", 2.3))
+} for n, d in db_stili.items()])
+
+# --- 3. GOOGLE SHEETS: MAGAZZINO, SHOPPING LIST, ARCHIVIO RICETTE ---
+SHEET_COLUMNS = {
+    "Magazzino": ["Categoria", "Nome", "Quantita", "Unita", "Prezzo"],
+    "Shopping_List": ["Categoria", "Nome", "Quantita", "Unita", "Formato_Pacchetto"],
+    "Archivio_Ricette": ["ID_Ricetta", "Nome", "Stile", "Data_Cotta", "Litri", "Fermentabili_JSON", "Luppoli_JSON", "Lievito", "Note"]
+}
+
+def _empty_sheet(name):
+    return pd.DataFrame(columns=SHEET_COLUMNS[name])
+
+def _safe_float(value, default=0.0):
+    try:
+        if pd.isna(value):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+def _safe_text(value, default=""):
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+def _canonical_category(value):
+    v = str(value or "").strip().lower()
+    return {
+        "malto": "Fermentabili", "malti": "Fermentabili", "fermentabile": "Fermentabili", "fermentabili": "Fermentabili",
+        "luppolo": "Luppoli", "luppoli": "Luppoli",
+        "lievito": "Lieviti", "lieviti": "Lieviti"
+    }.get(v, str(value or "").strip())
+
+def _read_sheet(name):
+    df = leggi_foglio(name)
+    if df.empty:
+        return _empty_sheet(name)
+    for col in SHEET_COLUMNS[name]:
+        if col not in df.columns:
+            df[col] = ""
+    return df[SHEET_COLUMNS[name]].copy()
+
 def carica_magazzino():
-    if os.path.exists("magazzino.json"):
-        with open("magazzino.json", "r", encoding='utf-8') as f: 
-            return json.load(f)
-    return {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {}}
+    mag = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}}
+    df = _read_sheet("Magazzino")
+    for _, row in df.iterrows():
+        cat = _canonical_category(_safe_text(row["Categoria"]))
+        nome = _safe_text(row["Nome"])
+        if cat in mag and nome:
+            mag[cat][nome] = {"qta": _safe_float(row["Quantita"]), "prezzo": _safe_float(row["Prezzo"])}
+    df = _read_sheet("Shopping_List")
+    for _, row in df.iterrows():
+        cat = _canonical_category(_safe_text(row["Categoria"]))
+        nome = _safe_text(row["Nome"])
+        if cat in mag["shopping_list"] and nome:
+            mag["shopping_list"][cat][nome] = _safe_float(row["Quantita"])
+    return mag
 
 def salva_magazzino(data):
-    with open("magazzino.json", "w", encoding='utf-8') as f: 
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    rows = []
+    for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
+        for nome, item in data.get(cat, {}).items():
+            rows.append({
+                "Categoria": cat, "Nome": nome, "Quantita": item.get("qta", 0),
+                "Unita": "kg" if cat == "Fermentabili" else ("g" if cat == "Luppoli" else "unita"),
+                "Prezzo": item.get("prezzo", 0)
+            })
+    salva_foglio("Magazzino", pd.DataFrame(rows, columns=SHEET_COLUMNS["Magazzino"]))
+
+    rows = []
+    for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
+        for nome, qta in data.get("shopping_list", {}).get(cat, {}).items():
+            rows.append({
+                "Categoria": cat, "Nome": nome, "Quantita": qta,
+                "Unita": "kg" if cat == "Fermentabili" else ("g" if cat == "Luppoli" else "bustine"),
+                "Formato_Pacchetto": "1kg/5kg/25kg" if cat == "Fermentabili" else ("30g/100g/250g" if cat == "Luppoli" else "1 bustina")
+            })
+    salva_foglio("Shopping_List", pd.DataFrame(rows, columns=SHEET_COLUMNS["Shopping_List"]))
+
+def _parse_json(value, default):
+    if value is None or (isinstance(value, float) and pd.isna(value)) or str(value).strip() == "":
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        try:
+            return ast.literal_eval(str(value))
+        except (ValueError, SyntaxError):
+            return default
 
 def carica_archivio():
-    if os.path.exists("archivio_ricette.json"):
-        with open("archivio_ricette.json", "r", encoding='utf-8') as f: 
-            return json.load(f)
-    return {}
+    df = _read_sheet("Archivio_Ricette")
+    archivio = {}
+    for _, row in df.iterrows():
+        nome = _safe_text(row["Nome"])
+        if not nome:
+            continue
+        meta = _parse_json(row["Note"], {})
+        if not isinstance(meta, dict):
+            meta = {"note": str(row["Note"] or "")}
+        archivio[nome] = {
+            "id_ricetta": str(row["ID_Ricetta"] or ""),
+            "stile": str(row["Stile"] or ""),
+            "data_imbottigliamento": str(row["Data_Cotta"] or ""),
+            "litri": _safe_float(row["Litri"], 25.0),
+            "fermentabili": _parse_json(row["Fermentabili_JSON"], []),
+            "luppoli": _parse_json(row["Luppoli_JSON"], []),
+            "yeast": _parse_json(row["Lievito"], None),
+            "mash_steps": meta.get("mash_steps", []),
+            "og_reale": _safe_float(meta.get("og_reale"), 1.050),
+            "fg_reale": _safe_float(meta.get("fg_reale"), 1.010),
+            "abv_reale": _safe_float(meta.get("abv_reale"), 5.5),
+            "note": meta.get("note", "")
+        }
+    return archivio
 
 def salva_archivio(dati):
-    with open("archivio_ricette.json", "w", encoding='utf-8') as f: 
-        json.dump(dati, f, indent=4, ensure_ascii=False)
+    rows = []
+    for nome, d in dati.items():
+        meta = {
+            "mash_steps": d.get("mash_steps", []),
+            "og_reale": d.get("og_reale", 1.050),
+            "fg_reale": d.get("fg_reale", 1.010),
+            "abv_reale": d.get("abv_reale", 5.5),
+            "note": d.get("note", "")
+        }
+        rows.append({
+            "ID_Ricetta": d.get("id_ricetta", ""),
+            "Nome": nome,
+            "Stile": d.get("stile", ""),
+            "Data_Cotta": d.get("data_imbottigliamento", ""),
+            "Litri": d.get("litri", 25.0),
+            "Fermentabili_JSON": json.dumps(d.get("fermentabili", []), ensure_ascii=False),
+            "Luppoli_JSON": json.dumps(d.get("luppoli", []), ensure_ascii=False),
+            "Lievito": json.dumps(d.get("yeast"), ensure_ascii=False),
+            "Note": json.dumps(meta, ensure_ascii=False)
+        })
+    salva_foglio("Archivio_Ricette", pd.DataFrame(rows, columns=SHEET_COLUMNS["Archivio_Ricette"]))
 
 def salva_ricetta_gsheets(nome, stile, data_imb, litri, fermentabili, luppoli, lievito, mash_steps, og_reale, fg_reale, abv_reale):
     archivio = carica_archivio()
+    old = archivio.get(nome, {})
     archivio[nome] = {
+        "id_ricetta": old.get("id_ricetta") or f"RIC-{date.today().strftime('%Y%m%d')}-{abs(hash(nome)) % 100000:05d}",
         "stile": stile,
         "data_imbottigliamento": data_imb.isoformat() if isinstance(data_imb, date) else str(data_imb),
-        "litri": litri,
-        "fermentabili": fermentabili,
-        "luppoli": luppoli,
-        "yeast": lievito,
-        "mash_steps": mash_steps,
-        "og_reale": og_reale,
-        "fg_reale": fg_reale,
-        "abv_reale": abv_reale
+        "litri": litri, "fermentabili": fermentabili, "luppoli": luppoli, "yeast": lievito,
+        "mash_steps": mash_steps, "og_reale": og_reale, "fg_reale": fg_reale, "abv_reale": abv_reale
     }
     salva_archivio(archivio)
 
@@ -177,16 +303,10 @@ def elimina_ricetta_gsheets(nome):
         salva_archivio(archivio)
 
 def genera_contesto_aigor(mag, archivio_json):
-    """Trasforma i dati del magazzino e archivio in contesto testuale per l'IA"""
     carrello = mag.get("shopping_list", {})
     malti_c = ", ".join([f"{n} ({q}kg)" for n, q in carrello.get("Fermentabili", {}).items()])
     luppoli_c = ", ".join([f"{n} ({q}g)" for n, q in carrello.get("Luppoli", {}).items()])
-    
-    ultime_ricette = "Nessuna"
-    if archivio_json:
-        nomi = list(archivio_json.keys())[-5:]
-        ultime_ricette = ", ".join(nomi)
-    
+    ultime_ricette = ", ".join(list(archivio_json.keys())[-5:]) if archivio_json else "Nessuna"
     return f"""
     CONTESTO ATTUALE:
     - NEL CARRELLO: Malti: [{malti_c}], Luppoli: [{luppoli_c}].
@@ -200,7 +320,6 @@ def aggiorna_scorta(categoria, nome, qta, prezzo=None, operazione="set"):
         mag[categoria] = {}
     if nome not in mag[categoria]:
         mag[categoria][nome] = {"qta": 0.0, "prezzo": 0.0}
-        
     attuale_qta = mag[categoria][nome].get("qta", 0.0)
     if operazione == "add":
         mag[categoria][nome]["qta"] = attuale_qta + qta
@@ -208,24 +327,18 @@ def aggiorna_scorta(categoria, nome, qta, prezzo=None, operazione="set"):
         mag[categoria][nome]["qta"] = max(0.0, attuale_qta - qta)
     else:
         mag[categoria][nome]["qta"] = qta
-        
     if prezzo is not None:
         mag[categoria][nome]["prezzo"] = prezzo
-        
     salva_magazzino(mag)
 
 def aggiungi_a_shopping_list(ingredienti_ricetta):
     mag = carica_magazzino()
-    if "shopping_list" not in mag or not isinstance(mag["shopping_list"].get("Fermentabili"), dict):
-        mag["shopping_list"] = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}
-    
     for ing in ingredienti_ricetta:
         nome = ing['nome']
         qta_necessaria = ing.get('kg') or ing.get('grammi') or 1
         cat = "Fermentabili" if 'kg' in ing else ("Luppoli" if 'grammi' in ing else "Lieviti")
-        attuale = mag["shopping_list"][cat].get(nome, 0.0)
-        mag["shopping_list"][cat][nome] = attuale + qta_necessaria
-                
+        mag["shopping_list"].setdefault(cat, {})
+        mag["shopping_list"][cat][nome] = mag["shopping_list"][cat].get(nome, 0.0) + qta_necessaria
     salva_magazzino(mag)
 
 # --- 4. CALCOLI TECNICI BIRRA ---
@@ -787,18 +900,18 @@ elif st.session_state.pagina == "Editor":
     st.divider(); col_salva, col_carrello, col_scarica = st.columns(3)
     if col_salva.button("💾 SALVA IN ARCHIVIO GSHEETS", use_container_width=True):
         salva_ricetta_gsheets(st.session_state.nome_b, st.session_state.stile_b, st.session_state.data_imb, st.session_state.litri_f, st.session_state.f_list, st.session_state.l_list, st.session_state.yeast_sel, st.session_state.m_list, st.session_state.og_reale, st.session_state.fg_reale, st.session_state.abv_reale)
-        st.toast("Salvata su Google Sheets!")
+        st.toast("Salvata in Archivio_Ricette!")
     
     if col_carrello.button("🛒 AGGIUNGI AL CARRELLO", use_container_width=True):
         tutti = st.session_state.f_list + st.session_state.l_list
         if st.session_state.yeast_sel: tutti.append({'nome': st.session_state.yeast_sel['nome'], 'lievito': True})
-        aggiungi_a_shopping_list(tutti); st.success("Aggiunti al carrello Google Sheets!")
+        aggiungi_a_shopping_list(tutti); st.success("Aggiunti a Shopping_List!")
     
     if col_scarica.button("🍺 SCARICA DAL MAGAZZINO", type="primary", use_container_width=True):
         for f_item in st.session_state.f_list: aggiorna_scorta("Fermentabili", f_item['nome'], f_item['kg'], operazione="sub")
         for l_item in st.session_state.l_list: aggiorna_scorta("Luppoli", l_item['nome'], l_item['grammi'], operazione="sub")
         if st.session_state.yeast_sel: aggiorna_scorta("Lieviti", st.session_state.yeast_sel['nome'], 1, operazione="sub")
-        st.success("Magazzino Google Sheets aggiornato!")
+        st.success("Magazzino aggiornato su Google Sheets!")
     
     st.divider()
     cd1, cd2 = st.columns(2)
@@ -860,7 +973,7 @@ elif st.session_state.pagina == "AIGOR":
 
         prompt_sistema = f"""
         Sei {nome_agente}, un homebrewer esperto dei Sons of Brewery.
-        SCORTE ATTUALI DA GOOGLE SHEETS: {scorte_info}
+        SCORTE ATTUALI DA GOOGLE SHEETS (Magazzino): {scorte_info}
         
         PARAMETRI TECNICI:
         - Direzioni: {', '.join(direzioni) if direzioni else 'Fai tu'}
@@ -905,86 +1018,86 @@ elif st.session_state.pagina == "AIGOR":
             st.session_state.chat_history = []
             st.rerun()
 
-# --- 11. PAGINA DATABASE GSHEETS ---
+# --- 11. PAGINA DATABASE JSON ---
 elif st.session_state.pagina == "Database":
-    st.title("🗄️ Gestione Database Google Sheets")
-    
+    st.title("🗄️ Database Tecnici JSON")
+    st.caption("Malti, luppoli, lieviti e stili sono gestiti esclusivamente dai file JSON del progetto.")
+
     tab_db1, tab_db2, tab_db3, tab_db4 = st.tabs(["🌾 Fermentabili", "🌿 Luppoli", "🧫 Lieviti", "🏆 Stili BJCP"])
 
     with tab_db1:
-        st.subheader("Aggiungi Malto a Google Sheets")
-        with st.form("form_malti"):
+        st.subheader("Gestione malti")
+        with st.form("form_malti_json"):
             nome_f = st.text_input("Nome Malto")
             c1, c2 = st.columns(2)
             ppg_f = c1.number_input("PPG", value=36.0)
             ebc_f = c2.number_input("EBC", value=10.0)
-            if st.form_submit_button("REGISTRA MALTO"):
-                if nome_f:
-                    nuovo = pd.DataFrame([{"Fermentabile": nome_f, "PPG": ppg_f, "EBC": ebc_f}])
-                    df_updated = pd.concat([df_f_m, nuovo], ignore_index=True).drop_duplicates(subset="Fermentabile")
-                    salva_foglio("Database_Malti", df_updated)
-                    st.success(f"{nome_f} salvato su Google Sheets!")
-                    st.rerun()
-        st.dataframe(df_f_m, use_container_width=True, hide_index=True)
+            if st.form_submit_button("REGISTRA MALTO") and nome_f.strip():
+                db_malti[nome_f.strip()] = {"EBC": ebc_f, "PPG": ppg_f}
+                salva_db("malti", db_malti)
+                st.success(f"{nome_f} salvato nel database JSON.")
+                st.rerun()
+        st.dataframe(pd.DataFrame([{"Fermentabile": n, "PPG": d.get("PPG", 0), "EBC": d.get("EBC", 0)} for n,d in db_malti.items()]), use_container_width=True, hide_index=True)
 
     with tab_db2:
-        st.subheader("Aggiungi Luppolo a Google Sheets")
-        with st.form("form_luppoli"):
+        st.subheader("Gestione luppoli")
+        with st.form("form_luppoli_json"):
             nome_l = st.text_input("Nome Luppolo")
-            c_l1, c_l2 = st.columns(2)
-            aa_l = c_l1.number_input("Alfa Acidi (%)", value=5.0)
-            tipo_l = c_l2.selectbox("Tipo Luppolo", ["Amaro", "Aroma", "Duale"])
-            if st.form_submit_button("REGISTRA LUPPOLO"):
-                if nome_l:
-                    nuovo_l = pd.DataFrame([{"Luppolo": nome_l, "Alfa acidi (%)": aa_l, "Tipo": tipo_l}])
-                    df_updated_l = pd.concat([df_l_m, nuovo_l], ignore_index=True).drop_duplicates(subset="Luppolo")
-                    salva_foglio("Database_Luppoli", df_updated_l)
-                    st.success(f"{nome_l} salvato su Google Sheets!")
-                    st.rerun()
-        st.dataframe(df_l_m, use_container_width=True, hide_index=True)
+            c1, c2 = st.columns(2)
+            aa_l = c1.number_input("Alfa Acidi (%)", value=5.0)
+            tipo_l = c2.selectbox("Tipo Luppolo", ["Amaro", "Aroma", "Duale", "New World", "Sperimentali"])
+            if st.form_submit_button("REGISTRA LUPPOLO") and nome_l.strip():
+                db_luppoli[nome_l.strip()] = {"Alfa acidi (%)": aa_l, "Tipo": tipo_l}
+                salva_db("luppoli", db_luppoli)
+                st.success(f"{nome_l} salvato nel database JSON.")
+                st.rerun()
+        st.dataframe(pd.DataFrame([{"Luppolo": n, "Alfa acidi (%)": d.get("Alfa acidi (%)", 0), "Tipo": d.get("Tipo", "")} for n,d in db_luppoli.items()]), use_container_width=True, hide_index=True)
 
     with tab_db3:
-        st.subheader("Aggiungi Lievito a Google Sheets")
-        with st.form("form_lieviti"):
+        st.subheader("Gestione lieviti")
+        with st.form("form_lieviti_json"):
             nome_y = st.text_input("Nome Lievito")
             att_y = st.number_input("Attenuazione (%)", value=75.0)
-            if st.form_submit_button("REGISTRA LIEVITO"):
-                if nome_y:
-                    nuovo_y = pd.DataFrame([{"Lievito": nome_y, "Attenuazione (%)": att_y}])
-                    df_updated_y = pd.concat([df_y_m, nuovo_y], ignore_index=True).drop_duplicates(subset="Lievito")
-                    salva_foglio("Database_Lieviti", df_updated_y)
-                    st.success(f"{nome_y} salvato su Google Sheets!")
-                    st.rerun()
-        st.dataframe(df_y_m, use_container_width=True, hide_index=True)
+            if st.form_submit_button("REGISTRA LIEVITO") and nome_y.strip():
+                db_lieviti[nome_y.strip()] = {"Attenuazione (%)": att_y}
+                salva_db("lieviti", db_lieviti)
+                st.success(f"{nome_y} salvato nel database JSON.")
+                st.rerun()
+        st.dataframe(pd.DataFrame([{"Lievito": n, "Attenuazione (%)": d.get("Attenuazione (%)", 0)} for n,d in db_lieviti.items()]), use_container_width=True, hide_index=True)
 
     with tab_db4:
-        st.subheader("Aggiungi Stile BJCP a Google Sheets")
-        with st.form("form_stili"):
-            nome_s = st.text_input("Nome Stile (es: American IPA)")
-            c1, c2, c3, c4, c5, c6 = st.columns(6)
-            
+        st.subheader("Gestione stili BJCP")
+        with st.form("form_stili_json"):
+            nome_s = st.text_input("Nome Stile")
+            c1,c2,c3,c4,c5,c6 = st.columns(6)
             og_min = c1.number_input("OG Min", value=1.040, format="%.3f")
             og_max = c1.number_input("OG Max", value=1.050, format="%.3f")
             fg_min = c2.number_input("FG Min", value=1.008, format="%.3f")
             fg_max = c2.number_input("FG Max", value=1.012, format="%.3f")
-            ibu_min = c3.number_input("IBU Min", value=20.0, step=1.0)
-            ibu_max = c3.number_input("IBU Max", value=40.0, step=1.0)
-            ebc_min = c4.number_input("EBC Min", value=5.0, step=1.0)
-            ebc_max = c4.number_input("EBC Max", value=15.0, step=1.0)
-            abv_min = c5.number_input("ABV Min %", value=4.5, step=0.1, format="%.1f")
-            abv_max = c5.number_input("ABV Max %", value=6.0, step=0.1, format="%.1f")
-            vol_co2 = c6.number_input("Vol. CO2", value=2.4, step=0.1, format="%.1f")
-            
-            if st.form_submit_button("REGISTRA NUOVO STILE"):
-                if nome_s:
-                    nuovo_s = pd.DataFrame([{
-                        "Stile": nome_s, "OG_min": og_min, "OG_max": og_max,
-                        "FG_min": fg_min, "FG_max": fg_max, "IBU_min": ibu_min,
-                        "IBU_max": ibu_max, "EBC_min": ebc_min, "EBC_max": ebc_max,
-                        "ABV_min": abv_min, "ABV_max": abv_max, "Vol_CO2": vol_co2
-                    }])
-                    df_updated_s = pd.concat([df_s_m, nuovo_s], ignore_index=True).drop_duplicates(subset="Stile")
-                    salva_foglio("Database_Stili", df_updated_s)
-                    st.success(f"{nome_s} salvato su Google Sheets!")
-                    st.rerun()
-        st.dataframe(df_s_m, use_container_width=True, hide_index=True)
+            ibu_min = c3.number_input("IBU Min", value=20.0)
+            ibu_max = c3.number_input("IBU Max", value=40.0)
+            ebc_min = c4.number_input("EBC Min", value=5.0)
+            ebc_max = c4.number_input("EBC Max", value=15.0)
+            abv_min = c5.number_input("ABV Min %", value=4.5)
+            abv_max = c5.number_input("ABV Max %", value=6.0)
+            vol_co2 = c6.number_input("Vol. CO2", value=2.4, step=0.1)
+            if st.form_submit_button("REGISTRA NUOVO STILE") and nome_s.strip():
+                db_stili[nome_s.strip()] = {
+                    "Volumi": vol_co2,
+                    "OG_min": round((og_min - 1) * 1000), "OG_max": round((og_max - 1) * 1000),
+                    "FG_min": round((fg_min - 1) * 1000), "FG_max": round((fg_max - 1) * 1000),
+                    "IBU_min": ibu_min, "IBU_max": ibu_max,
+                    "EBC_min": ebc_min, "EBC_max": ebc_max,
+                    "ABV_min": abv_min, "ABV_max": abv_max
+                }
+                salva_db("stili", db_stili)
+                st.success(f"{nome_s} salvato nel database JSON.")
+                st.rerun()
+        st.dataframe(pd.DataFrame([{
+            "Stile": n, "OG_min": 1+d.get("OG_min",0)/1000, "OG_max": 1+d.get("OG_max",0)/1000,
+            "FG_min": 1+d.get("FG_min",0)/1000, "FG_max": 1+d.get("FG_max",0)/1000,
+            "IBU_min": d.get("IBU_min",0), "IBU_max": d.get("IBU_max",0),
+            "EBC_min": d.get("EBC_min",0), "EBC_max": d.get("EBC_max",0),
+            "ABV_min": d.get("ABV_min",0), "ABV_max": d.get("ABV_max",0), "Vol_CO2": d.get("Volumi",2.3)
+        } for n,d in db_stili.items()]), use_container_width=True, hide_index=True)
+
