@@ -48,7 +48,7 @@ def get_spreadsheet():
         if "SPREADSHEET_URL" in st.secrets:
             return gc.open_by_url(st.secrets["SPREADSHEET_URL"])
         
-        # 2. Se hai l'ID dello Sheet nei Secrets (es. SPREADSHEET_ID = "1aB2c3...")
+        # 2. Se hai l'ID dello Sheet nei Secrets
         if "SPREADSHEET_ID" in st.secrets:
             return gc.open_by_key(st.secrets["SPREADSHEET_ID"])
 
@@ -58,6 +58,8 @@ def get_spreadsheet():
         st.error(f"Impossibile aprire il foglio Google: {e}")
         return None
 
+# Definizione globale della variabile sh necessaria a tutte le sezioni
+sh = get_spreadsheet()
 # --- CARICAMENTO API KEY GEMINI (MODALITÀ SICURA) ---
 def get_api_key():
     # 1. Prova a leggere dai Secrets di Streamlit (per il Cloud)
