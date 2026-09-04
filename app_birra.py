@@ -421,31 +421,44 @@ def scala_ingredienti(nuovi_litri, vecchi_litri, fermentabili, luppoli):
     return fermentabili, luppoli
 
 # --- 5. FUNZIONI PDF SCHEDA ED ETICHETTE ---
+
+FONT_FILE = "Carnevalee Freakshow.ttf"
+FONT_NAME = "Freakshow"
+
+def carica_font_personalizzato(pdf):
+    """Carica il font personalizzato TTF se presente sul disco."""
+    if os.path.exists(FONT_FILE):
+        try:
+            # In FPDF2 non serve uni=True
+            pdf.add_font(FONT_NAME, "", FONT_FILE)
+            return FONT_NAME
+        except Exception:
+            return "Helvetica"
+    return "Helvetica"
+
 def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, fermentabili, luppoli, lievito, mash_steps):
     pdf = FPDF()
     pdf.add_page()
     
-    try:
-        pdf.add_font('Freakshow', '', 'Carnevalee Freakshow.ttf', uni=True)
-        font_titolo = 'Freakshow'
-    except:
-        font_titolo = 'Helvetica'
+    font_titolo = carica_font_personalizzato(pdf)
 
     def clean(t):
-        if not isinstance(t, str): t = str(t)
-        return t.replace("’", "'").replace("“", '"').replace("”", '"').encode('latin-1', 'replace').decode('latin-1')
+        if not isinstance(t, str): 
+            t = str(t)
+        # Sostituzione apostrofi/virgolette tipografiche
+        return t.replace("’", "'").replace("“", '"').replace("”", '"')
 
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font(font_titolo, '', 45) 
-    pdf.cell(0, 25, clean(nome.upper()), ln=True, align='C')
+    pdf.set_font(font_titolo, '', 40) 
+    pdf.cell(0, 20, clean(nome).upper(), ln=True, align='C')
     
-    pdf.set_font(font_titolo, '', 25) 
+    pdf.set_font(font_titolo, '', 22) 
     testo_stile = f"Stile: {stile}" if stile else "Stile: Libero"
-    pdf.cell(0, 15, clean(testo_stile), ln=True, align='C')
+    pdf.cell(0, 12, clean(testo_stile), ln=True, align='C')
     
     pdf.set_draw_color(0, 0, 0)
     pdf.line(10, pdf.get_y() + 2, 200, pdf.get_y() + 2)
-    pdf.ln(10)
+    pdf.ln(8)
 
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Helvetica", 'B', 11)
@@ -482,20 +495,19 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
 
     sez("MALTI E FERMENTABILI", [f"{f['nome']}: {f['kg']} kg" for f in fermentabili], 255, 245, 200)
     sez("LUPPOLI", [f"{l['tipo']}: {l['nome']} {l['grammi']}g ({l['valore_tempo']} min/gg)" for l in luppoli], 220, 240, 220)
-    sez("LIEVITO", [f"{lievito['nome']}" if lievito else "Nessuno"], 240, 240, 240)
+    
+    nome_lievito = lievito.get('nome', 'Nessuno') if isinstance(lievito, dict) else (lievito if lievito else "Nessuno")
+    sez("LIEVITO", [f"{nome_lievito}"], 240, 240, 240)
     sez("MASH", [f"{s['temp']} C per {s['tempo']} min" for s in mash_steps], 210, 230, 250)
 
     return bytes(pdf.output())
+
 
 def genera_pdf_etichette(nome, stile, abv, data_imb):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     
-    if os.path.exists("Carnevalee Freakshow.ttf"):
-        pdf.add_font("Carnivalee", "", "Carnevalee Freakshow.ttf")
-        font_main = "Carnivalee"
-    else:
-        font_main = "Helvetica"
+    font_main = carica_font_personalizzato(pdf)
     
     BASE_W, BASE_H = 62, 85
     w_et, h_et = 55, 73
@@ -525,11 +537,11 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
 
         pdf.set_font(font_main, "", max(1, int(20 * scale)))
         pdf.set_xy(x, y + s(55))
-        pdf.cell(w_et, s(10), nome.upper(), align='C')
+        pdf.cell(w_et, s(10), str(nome).upper(), align='C')
 
         pdf.set_font(font_main, "", max(1, int(14 * scale)))
         pdf.set_xy(x + 2, y + s(75)) 
-        pdf.cell(s(30), s(10), stile.upper(), align='L')
+        pdf.cell(s(30), s(10), str(stile).upper() if stile else "LIBERO", align='L')
 
         pdf.set_font(font_main, "", max(1, int(18 * scale)))
         pdf.set_xy(x + w_et - s(15) - 2, y + s(75))
@@ -538,7 +550,7 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
         if os.path.exists("Pregnant.png"):
             pdf.image("Pregnant.png", x + s(2.5), y + s(64.5), s(6))
 
-        pdf.set_font("Times", "", max(1, int(7 * scale)))
+        pdf.set_font("Helvetica", "", max(1, int(7 * scale)))
         with pdf.rotation(90, x + w_et - s(1.5), y + s(55)):
             pdf.text(x + w_et - s(1.5), y + s(55), f"Imbottigliata il {data_imb}")
 
