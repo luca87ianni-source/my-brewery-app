@@ -124,6 +124,23 @@ def salva_db(tipo, dati):
         json.dump(dati, f, indent=4, ensure_ascii=False)
     st.cache_data.clear()
 
+def _safe_float(value, default=0.0):
+    try:
+        if pd.isna(value):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+def _safe_text(value, default=""):
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
 # Normalizziamo i JSON in DataFrame solo per riutilizzare la UI/calcoli esistenti.
 db_malti = carica_db("malti")
 db_luppoli = carica_db("luppoli")
@@ -153,22 +170,6 @@ SHEET_COLUMNS = {
 
 def _empty_sheet(name):
     return pd.DataFrame(columns=SHEET_COLUMNS[name])
-
-def _safe_float(value, default=0.0):
-    try:
-        if pd.isna(value):
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-def _safe_text(value, default=""):
-    try:
-        if pd.isna(value):
-            return default
-    except (TypeError, ValueError):
-        pass
-    return str(value).strip()
 
 def _canonical_category(value):
     v = str(value or "").strip().lower()
