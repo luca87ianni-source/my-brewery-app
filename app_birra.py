@@ -10,7 +10,19 @@ from google.genai import types
 import gspread
 from google.oauth2.service_account import Credentials
 
-# --- INIZIALIZZAZIONE CONNESSIONE GSHEETS TRAMITE GSPREAD ---
+import streamlit as st
+import pandas as pd
+import os
+import math
+import json
+from datetime import date
+from fpdf import FPDF 
+from google import genai
+from google.genai import types
+import gspread
+from google.oauth2.service_account import Credentials
+
+# --- 1. CONFIGURAZIONE E AUTENTICAZIONE GSPREAD ---
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
@@ -18,7 +30,7 @@ SCOPES = [
 
 @st.cache_resource
 def get_gspread_client():
-    """Inizializza e autentica il client gspread usando i Secrets di Streamlit."""
+    """Inizializza e autentica il client gspread mantenendolo in memoria."""
     try:
         if "gcp_service_account" in st.secrets:
             creds = Credentials.from_service_account_info(
@@ -38,7 +50,7 @@ def get_gspread_client():
         return None
 
 def get_spreadsheet():
-    """Recupera l'oggetto Spreadsheet aprendolo da ID, URL o Nome."""
+    """Recupera l'oggetto Spreadsheet aprendolo da ID o URL salvato nei Secrets."""
     gc = get_gspread_client()
     if not gc:
         return None
@@ -48,14 +60,20 @@ def get_spreadsheet():
         if "SPREADSHEET_URL" in st.secrets and st.secrets["SPREADSHEET_URL"]:
             return gc.open_by_url(st.secrets["SPREADSHEET_URL"])
         return gc.open("SonsOfBrewery_DB")
-    except Exception as e:
-        # Evitiamo di bloccare l'interfaccia con errori rossi continui
+    except Exception:
         return None
 
-# Funzione universale e protetta con cache per leggere qualsiasi scheda
-@st.cache_data(ttl=120)
+# Definizione globale di sh per retrocompatibilità con le funzioni legacy
+sh = get_spreadsheet()
+
+
+# --- 2. GESTIONE LETTURA DATI CON CACHE (300 SECONDI / 5 MINUTI) ---
+@st.cache_data(ttl=300)
 def read_sheet_data(worksheet_name):
-    """Legge una scheda da Google Sheets memorizzando i dati in cache per 2 minuti."""
+    """
+    Legge una scheda da Google Sheets e la conserva in memoria RAM per 5 minuti.
+    Evita blocchi e l'errore 429 Quota Exceeded durante la navigazione.
+    """
     spreadsheet = get_spreadsheet()
     if not spreadsheet:
         return pd.DataFrame()
@@ -64,10 +82,8 @@ def read_sheet_data(worksheet_name):
         data = ws.get_all_records()
         return pd.DataFrame(data)
     except Exception:
+        # Ritorna un dataframe vuoto invece di far andare l'app in crash
         return pd.DataFrame()
-
-# Definizione di fallback per compatibilità retroattiva con le vecchie funzioni
-sh = get_spreadsheet()
 
 # --- CARICAMENTO API KEY GEMINI (MODALITÀ SICURA) ---
 def get_api_key():
