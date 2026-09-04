@@ -7,6 +7,10 @@ from datetime import date
 from fpdf import FPDF 
 from google import genai
 from google.genai import types
+from streamlit_gsheets import StConnection
+
+# --- INIZIALIZZAZIONE CONNESSIONE GSHEETS ---
+conn = st.connection("gsheets", type=StConnection)
 
 # --- CARICAMENTO API KEY GEMINI (MODALITÀ SICURA) ---
 def get_api_key():
@@ -14,8 +18,7 @@ def get_api_key():
     if "GOOGLE_API_KEY" in st.secrets:
         return st.secrets["GOOGLE_API_KEY"]
     
-    # 2. Backup per il locale: se hai ancora il file .txt lo legge, 
-    # altrimenti cerca nelle variabili d'ambiente
+    # 2. Backup per il locale
     if os.path.exists("key_gemini.txt"):
         with open("key_gemini.txt", "r") as f:
             return f.read().strip()
@@ -38,7 +41,7 @@ if 'nome_b' not in st.session_state: st.session_state.nome_b = "Nuova Ricetta"
 if 'stile_b' not in st.session_state: st.session_state.stile_b = ""
 if 'data_imb' not in st.session_state: st.session_state.data_imb = date.today()
 if 'litri_f' not in st.session_state: st.session_state.litri_f = 25.0
-if 'litri_precedenti' not in st.session_state: st.session_state.litri_precedenti = 25.0 # Per monitorare i cambi
+if 'litri_precedenti' not in st.session_state: st.session_state.litri_precedenti = 25.0
 if 'f_list' not in st.session_state: st.session_state.f_list = []
 if 'l_list' not in st.session_state: st.session_state.l_list = []
 if 'm_list' not in st.session_state: st.session_state.m_list = []
@@ -47,11 +50,11 @@ if 'og_reale' not in st.session_state: st.session_state.og_reale = 1.050
 if 'fg_reale' not in st.session_state: st.session_state.fg_reale = 1.010
 if 'abv_reale' not in st.session_state: st.session_state.abv_reale = 5.5
 
-# --- 2. GESTIONE DATI (Magazzino, Shopping List e Database Ingredienti) ---
+# --- 2. GESTIONE DATI (JSON LOCALI + GOOGLE SHEETS) ---
 
 @st.cache_data
 def carica_db(tipo):
-    """Carica i database tecnici (Malti, Luppoli, ecc.) dai file JSON"""
+    """Carica i database tecnici (Malti, Luppoli, ecc.) dai file JSON locali"""
     files = {
         "malti": "database_malti.json",
         "luppoli": "database_luppoli.json",
@@ -66,7 +69,7 @@ def carica_db(tipo):
     return {}
 
 def salva_db(tipo, dati):
-    """Salva le modifiche ai database e pulisce la cache di Streamlit"""
+    """Salva le modifiche ai database locali e pulisce la cache di Streamlit"""
     files = {
         "malti": "database_malti.json", 
         "luppoli": "database_luppoli.json", 
@@ -78,30 +81,148 @@ def salva_db(tipo, dati):
     if f_path:
         with open(f_path, "w", encoding='utf-8') as f:
             json.dump(dati, f, indent=4, ensure_ascii=False)
-        st.cache_data.clear() # Forza l'app a rileggere i dati aggiornati
+        st.cache_data.clear()
+
+# --- FUNZIONI GOOGLE SHEETS FOR MAGAZZINO, SHOPPING LIST E ARCHIVIO ---
 
 def carica_magazzino():
-    if os.path.exists("magazzino.json"):
-        with open("magazzino.json", "r", encoding='utf-8') as f: 
-            return json.load(f)
-    return {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {}}
+    """Legge la scheda 'Magazzino' da Google Sheets e la adatta al dizionario dell'app."""
+    try:
+        df = conn.read(worksheet="Magazzino", ttl=5)
+        mag = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {}}
+        
+        if not df.empty:
+            for _, row in df.iterrows():
+                cat = row.get("Categoria")
+                nome = row.get("Nome")
+                if cat in ["Fermentabili", "Luppoli", "Lieviti"] and pd.notna(nome):
+                    mag[cat][str(nome)] = {
+                        "qta": float(row.get("Quantita", 0.0)),
+                        "prezzo": float(row.get("Prezzo", 0.0))
+                    }
+        
+        # Carica contestualmente la shopping list per completare l'oggetto magazzino
+        mag["shopping_list"] = carica_shopping_list_dict()
+        return mag
+    except Exception as e:
+        st.warning(f"Errore nella lettura del Magazzino da GSheets: {e}")
+        return {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}, "shopping_list": {}}
 
 def salva_magazzino(data):
-    with open("magazzino.json", "w", encoding='utf-8') as f: 
-        json.dump(data, f, indent=4)
+    """Salva il Magazzino su Google Sheets mantenendo strutturate le categorie."""
+    righe = []
+    for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
+        unita = "Kg" if cat == "Fermentabili" else ("g" if cat == "Luppoli" else "Unita")
+        for nome, info in data.get(cat, {}).items():
+            righe.append({
+                "Categoria": cat,
+                "Nome": nome,
+                "Quantita": float(info.get("qta", 0.0)),
+                "Unita": unita,
+                "Prezzo": float(info.get("prezzo", 0.0))
+            })
+    
+    df = pd.DataFrame(righe, columns=["Categoria", "Nome", "Quantita", "Unita", "Prezzo"])
+    conn.update(worksheet="Magazzino", data=df)
+    
+    # Salva separatamente la Shopping List se presente
+    if "shopping_list" in data:
+        salva_shopping_list_dict(data["shopping_list"])
+
+def carica_shopping_list_dict():
+    """Helper per caricare la scheda 'Shopping_List' come dizionario interno."""
+    try:
+        df = conn.read(worksheet="Shopping_List", ttl=5)
+        shop = {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}
+        if not df.empty:
+            for _, row in df.iterrows():
+                cat = row.get("Categoria")
+                nome = row.get("Nome")
+                if cat in shop and pd.notna(nome):
+                    shop[cat][str(nome)] = float(row.get("Quantita", 0.0))
+        return shop
+    except Exception:
+        return {"Fermentabili": {}, "Luppoli": {}, "Lieviti": {}}
+
+def salva_shopping_list_dict(shop_data):
+    """Helper per salvare la Shopping List su Google Sheets."""
+    righe = []
+    for cat in ["Fermentabili", "Luppoli", "Lieviti"]:
+        unita = "Kg" if cat == "Fermentabili" else ("g" if cat == "Luppoli" else "Unita")
+        for nome, qta in shop_data.get(cat, {}).items():
+            righe.append({
+                "Categoria": cat,
+                "Nome": nome,
+                "Quantita": float(qta),
+                "Unita": unita,
+                "Formato_Pacchetto": ""
+            })
+    df = pd.DataFrame(righe, columns=["Categoria", "Nome", "Quantita", "Unita", "Formato_Pacchetto"])
+    conn.update(worksheet="Shopping_List", data=df)
 
 def carica_archivio():
-    if os.path.exists("archivio_ricette.json"):
-        with open("archivio_ricette.json", "r", encoding='utf-8') as f: 
-            return json.load(f)
-    return {}
+    """Carica l'Archivio Ricette da Google Sheets deserializzando le stringhe JSON."""
+    try:
+        df = conn.read(worksheet="Archivio_Ricette", ttl=5)
+        if df.empty:
+            return {}
+        
+        archivio = {}
+        for _, row in df.iterrows():
+            nome = str(row.get("Nome", ""))
+            if not nome:
+                continue
+                
+            def da_json(val):
+                if isinstance(val, str) and val.strip():
+                    try:
+                        return json.loads(val)
+                    except json.JSONDecodeError:
+                        return []
+                return val if isinstance(val, (list, dict)) else []
+
+            archivio[nome] = {
+                "stile": str(row.get("Stile", "")),
+                "data_imbottigliamento": str(row.get("Data_Cotta", "")),
+                "litri": float(row.get("Litri", 25.0)),
+                "data": str(row.get("Data_Cotta", "")),
+                "fermentabili": da_json(row.get("Fermentabili_JSON")),
+                "luppoli": da_json(row.get("Luppoli_JSON")),
+                "yeast": da_json(row.get("Lievito")),
+                "mash_steps": da_json(row.get("Note")), # Mash/Note salvati strutturati
+                "og_reale": 1.050,
+                "fg_reale": 1.010,
+                "abv_reale": 5.5
+            }
+        return archivio
+    except Exception as e:
+        st.warning(f"Errore lettura Archivio Ricette da GSheets: {e}")
+        return {}
 
 def salva_archivio(dati):
-    with open("archivio_ricette.json", "w", encoding='utf-8') as f: 
-        json.dump(dati, f, indent=4)
+    """Serializza e salva l'Archivio Ricette sul tab 'Archivio_Ricette' di Google Sheets."""
+    righe = []
+    for idx, (nome, d) in enumerate(dati.items(), start=1):
+        righe.append({
+            "ID_Ricetta": idx,
+            "Nome": nome,
+            "Stile": d.get("stile", ""),
+            "Data_Cotta": d.get("data_imbottigliamento", str(date.today())),
+            "Litri": d.get("litri", 25.0),
+            "Fermentabili_JSON": json.dumps(d.get("fermentabili", []), ensure_ascii=False),
+            "Luppoli_JSON": json.dumps(d.get("luppoli", []), ensure_ascii=False),
+            "Lievito": json.dumps(d.get("yeast", {}), ensure_ascii=False),
+            "Note": json.dumps(d.get("mash_steps", []), ensure_ascii=False)
+        })
+    
+    df = pd.DataFrame(righe, columns=[
+        "ID_Ricetta", "Nome", "Stile", "Data_Cotta", "Litri", 
+        "Fermentabili_JSON", "Luppoli_JSON", "Lievito", "Note"
+    ])
+    conn.update(worksheet="Archivio_Ricette", data=df)
 
 def genera_contesto_aigor(mag, archivio_json):
-    """Trasforma i dati del JSON in testo per l'IA"""
+    """Trasforma i dati in testo per l'IA"""
     carrello = mag.get("shopping_list", {})
     malti_c = ", ".join([f"{n} ({q}kg)" for n, q in carrello.get("Fermentabili", {}).items()])
     luppoli_c = ", ".join([f"{n} ({q}g)" for n, q in carrello.get("Luppoli", {}).items()])
@@ -162,7 +283,7 @@ st.markdown("""
     div.stButton > button, div.stButton > button p {
         background-color: #FFD700 !important;
         color: #000000 !important;
-        font-weight: 900 !important; /* Extra bold per massima leggibilità */
+        font-weight: 900 !important;
     }
 
     /* FIX SPECIFICO PER I BOTTONI STANDARD */
@@ -211,7 +332,7 @@ def inizializza_database():
 df_f_m, df_l_m, df_y_m, df_s_m = inizializza_database()
 
 def salva_su_file(nome, stile, data_imb, litri, fermentabili, luppoli, yeast, mash_steps, og_r, fg_r, abv_r):
-    """Salva la ricetta nell'archivio JSON"""
+    """Salva la ricetta nell'archivio su Google Sheets"""
     archivio = carica_archivio()
     archivio[nome] = {
         "stile": stile, 
@@ -229,7 +350,7 @@ def salva_su_file(nome, stile, data_imb, litri, fermentabili, luppoli, yeast, ma
     salva_archivio(archivio)
 
 def elimina_da_file(nome):
-    """Elimina una ricetta dall'archivio"""
+    """Elimina una ricetta dall'archivio Google Sheets"""
     archivio = carica_archivio()
     if nome in archivio:
         del archivio[nome]
@@ -345,7 +466,6 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
     pdf = FPDF()
     pdf.add_page()
     
-    # --- REGISTRAZIONE FONT ---
     try:
         pdf.add_font('Freakshow', '', 'Carnevalee_Freakshow.ttf', uni=True)
         font_titolo = 'Freakshow'
@@ -356,22 +476,18 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
         if not isinstance(t, str): t = str(t)
         return t.replace("’", "'").replace("“", '"').replace("”", '"').encode('latin-1', 'replace').decode('latin-1')
 
-    # --- INTESTAZIONE NERO SU BIANCO ---
     pdf.set_text_color(0, 0, 0)
     pdf.set_font(font_titolo, '', 45) 
     pdf.cell(0, 25, clean(nome.upper()), ln=True, align='C')
     
-    # 2. STILE (Sempre nel tuo font, un po' più piccolo)
     pdf.set_font(font_titolo, '', 25) 
     testo_stile = f"Stile: {stile}" if stile else "Stile: Libero"
     pdf.cell(0, 15, clean(testo_stile), ln=True, align='C')
     
-    # Linea di separazione elegante
     pdf.set_draw_color(0, 0, 0)
     pdf.line(10, pdf.get_y() + 2, 200, pdf.get_y() + 2)
     pdf.ln(10)
 
-    # --- RIEPILOGO TECNICO ---
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(0, 8, " PARAMETRI TECNICI", ln=True, fill=True)
@@ -384,7 +500,6 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
     pdf.cell(38, 10, clean(f" EBC: {ebc:.1f}"), border='RTB', ln=True)
     pdf.ln(5)
 
-    # Volumi Acqua
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(0, 8, " VOLUMI ACQUA", ln=True, fill=True)
     pdf.set_font("Helvetica", '', 10)
@@ -393,7 +508,6 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
     pdf.cell(64, 10, clean(f" Totale: {litri} L"), border=1, ln=True)
     pdf.ln(5)
 
-    # Sezioni Ingredienti
     def sez(t, d, r, g, b):
         pdf.set_fill_color(r, g, b)
         pdf.set_font("Helvetica", 'B', 11)
@@ -414,7 +528,7 @@ def genera_pdf_ricetta(nome, stile, litri, og, fg, abv, ibu, ebc, a_m, a_s, ferm
 
     return bytes(pdf.output())
 
-# --- 5b. NUOVA FUNZIONE PDF ETICHETTE (MODIFICATA) ---
+# --- 5b. NUOVA FUNZIONE PDF ETICHETTE ---
 def genera_pdf_etichette(nome, stile, abv, data_imb):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
@@ -425,15 +539,13 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
     else:
         font_main = "Helvetica"
     
-    # Parametri di scala
     BASE_W, BASE_H = 62, 85
-    w_et, h_et = 55, 73   # Dimensioni attuali
+    w_et, h_et = 55, 73
     scale = min(w_et / BASE_W, h_et / BASE_H)
 
     def s(v):
         return v * scale
 
-    # Margini centrati
     m_x = (210 - (3 * w_et)) / 2
     m_y = (297 - (3 * h_et)) / 2
 
@@ -443,44 +555,35 @@ def genera_pdf_etichette(nome, stile, abv, data_imb):
         x = m_x + (col * w_et)
         y = m_y + (row * h_et)
 
-        # Bordo etichetta
         pdf.set_line_width(1.4)
         pdf.rect(x, y, w_et, h_et)
         pdf.set_line_width(0.2)
 
-        # 1. Logo Upper
         if os.path.exists("Logo Upper.png"):
             pdf.image("Logo Upper.png", x + s(4), y + s(3), w_et - s(8))
 
-        # 2. Logo Medium
         if os.path.exists("Logo Medium.png"):
             p_w = s(35)
             pdf.image("Logo Medium.png", x + (w_et - p_w) / 2, y + s(14), p_w)
 
-        # 3. EST 2021 (Commentato come da tua richiesta)
         pdf.set_font("Times", 'B', max(1, int(7 * scale)))
         pdf.set_xy(x, y + s(48))
 
-        # 4. Nome birra (RIGA TITOLO - INGRANDITA)
         pdf.set_font(font_main, "", max(1, int(20 * scale)))
         pdf.set_xy(x, y + s(55))
         pdf.cell(w_et, s(10), nome.upper(), align='C')
 
-        # --- 4. STILE (Allineato a sinistra) ---
         pdf.set_font(font_main, "", max(1, int(14 * scale)))
         pdf.set_xy(x + 2, y + s(75)) 
         pdf.cell(s(30), s(10), stile.upper(), align='L')
 
-        # --- 5. ABV (Allineato a destra) ---
         pdf.set_font(font_main, "", max(1, int(18 * scale)))
         pdf.set_xy(x + w_et - s(15) - 2, y + s(75))
         pdf.cell(s(15), s(10), f"{abv:.1f}%", align='R')
 
-        # 6. Icona Pregnant
         if os.path.exists("Pregnant.png"):
             pdf.image("Pregnant.png", x + s(2.5), y + s(64.5), s(6))
 
-        # 7. Data imbottigliamento
         pdf.set_font("Times", "", max(1, int(7 * scale)))
         with pdf.rotation(90, x + w_et - s(1.5), y + s(55)):
             pdf.text(x + w_et - s(1.5), y + s(55), f"Imbottigliata il {data_imb}")
@@ -497,7 +600,6 @@ with st.sidebar:
     
     st.markdown("<h2 style='color:#FFD700;'>SONS OF BREWERY</h2>", unsafe_allow_html=True)
     
-    # PULSANTI DI NAVIGAZIONE
     if st.button("🏠 DASHBOARD", width="stretch"): 
         st.session_state.pagina = "Home"; st.rerun()
     if st.button("🛠️ EDITOR RICETTA", width="stretch"): 
@@ -518,7 +620,10 @@ with st.sidebar:
             d = archivio[nome_r]
             st.session_state.nome_b, st.session_state.stile_b = nome_r, d.get('stile','')
             if 'data_imbottigliamento' in d:
-                st.session_state.data_imb = date.fromisoformat(d['data_imbottigliamento'])
+                try:
+                    st.session_state.data_imb = date.fromisoformat(d['data_imbottigliamento'])
+                except ValueError:
+                    st.session_state.data_imb = date.today()
             st.session_state.litri_f = d.get('litri',25.0)
             st.session_state.f_list = d.get('fermentabili',[])
             st.session_state.l_list = d.get('luppoli',[])
@@ -531,7 +636,7 @@ with st.sidebar:
 
 # --- 7. PAGINA MAGAZZINO ---
 if st.session_state.pagina == "Magazzino":
-    st.title("📦 Magazzino Scorte")
+    st.title("📦 Magazzino Scorte (Google Sheets)")
     mag = carica_magazzino()
     t1, t2, t3 = st.tabs(["Malti", "Luppoli", "Lieviti"])
     
@@ -674,7 +779,6 @@ elif st.session_state.pagina == "Editor":
     nuovi_litri = c3.number_input("LITRI", value=float(st.session_state.litri_f), step=1.0)
     st.session_state.data_imb = c4.date_input("DATA IMB.", value=st.session_state.data_imb)
 
-    # Logica di Scaling
     if nuovi_litri != st.session_state.litri_f:
         if st.session_state.f_list or st.session_state.l_list:
             st.warning(f"⚠️ Hai cambiato il volume da {st.session_state.litri_f}L a {nuovi_litri}L.")
@@ -686,10 +790,8 @@ elif st.session_state.pagina == "Editor":
         else:
             st.session_state.litri_f = nuovi_litri
 
-    # Calcolo parametri tecnici
     og, v_pre, a_m, a_s, kg_t, ibu, fg, abv, ebc = calcola_ricetta_completa(st.session_state.litri_f, st.session_state.f_list, st.session_state.l_list, st.session_state.yeast_sel)
     
-    # --- RECUPERO LIMITI BJCP ---
     bjcp_limits = {"og": (0,0), "fg": (0,0), "ibu": (0,0), "ebc": (0,0), "abv": (0,0)}
     vol_default = 2.3
     
@@ -710,22 +812,7 @@ elif st.session_state.pagina == "Editor":
             "abv": (float(s_info.get('ABV_min', 0)), float(s_info.get('ABV_max', 0))),
         }
         vol_default = float(s_info.get('Vol_CO2', s_info.get('Volumi', 2.3)))
-    
-    # --- 2. RECUPERO VOLUMI CO2 ---
-    if st.session_state.stile_b and not df_s_m.empty:
-        s_info = df_s_m[df_s_m["Stile"] == st.session_state.stile_b]
-        if not s_info.empty:
-            colonne = s_info.columns
-            colonna_target = "Vol_CO2" if "Vol_CO2" in colonne else ("Volumi" if "Volumi" in colonne else None)
-            
-            if colonna_target:
-                try:
-                    val = float(s_info[colonna_target].values[0])
-                    vol_default = val if val > 0 else 2.3
-                except:
-                    vol_default = 2.3
 
-    # --- 3. CALCOLO COSTI ---
     costo_tot = 0.0
     for f in st.session_state.f_list:
         m_mag = mag["Fermentabili"].get(f['nome'], {})
@@ -741,7 +828,6 @@ elif st.session_state.pagina == "Editor":
         y_mag = mag["Lieviti"].get(st.session_state.yeast_sel['nome'], {})
         costo_tot += y_mag.get('prezzo', 0)
 
-    # --- 4. BOX TECNICO E TILE COSTI ---
     st.markdown(f"""<div class="calc-box"><div style="display:flex; justify-content:space-around; text-align:center;">
         <div><div class="metric-label">OG/FG</div><div class="metric-value">{og:.3f}/{fg:.3f}</div></div>
         <div><div class="metric-label">ABV%</div><div class="metric-value" style="color:#d40000;">{abv:.1f}%</div></div>
@@ -749,7 +835,6 @@ elif st.session_state.pagina == "Editor":
         <div><div class="metric-label">MASH/SPARGE</div><div class="metric-value">{a_m:.1f}/{a_s:.1f}L</div></div>
     </div></div>""", unsafe_allow_html=True)
 
-    # --- DASHBOARD BJCP ---
     st.markdown("### 📊 Rispetto dello Stile (BJCP)")
     with st.container(border=True):
         bj1, bj2, bj3, bj4, bj5 = st.columns(5)
@@ -767,7 +852,6 @@ elif st.session_state.pagina == "Editor":
                 st.markdown(f"<p style='color:{colore}; font-size:18px; font-weight:bold; margin:0;'>{icona} {fmt.format(val)}</p>", unsafe_allow_html=True)
                 st.caption(f"Lim: {lim[0]}-{lim[1]}")
 
-    # --- RILEVAZIONI EFFETTIVE ---
     st.markdown("### 📏 RILEVAZIONI EFFETTIVE")
     with st.container(border=True):
         cr1, cr2, cr3 = st.columns(3)
@@ -776,13 +860,11 @@ elif st.session_state.pagina == "Editor":
         abv_reale_calc = (st.session_state.og_reale - st.session_state.fg_reale) * 131.25 + 0.5
         st.session_state.abv_reale = cr3.number_input("ABV % Finale (+0.5%)", value=float(abv_reale_calc), format="%.1f")
 
-    # TILE VERDE COSTI
     st.markdown(f"""<div class="calc-box" style="background-color: #28a745; color: white !important;"><div style="display:flex; justify-content:space-around; text-align:center;">
             <div><div class="metric-label" style="color:white !important;">Costo Totale Cotta</div><div class="metric-value" style="color:white !important;">{costo_tot:.2f} €</div></div>
             <div><div class="metric-label" style="color:white !important;">Costo al Litro</div><div class="metric-value" style="color:white !important;">{(costo_tot/st.session_state.litri_f if st.session_state.litri_f>0 else 0):.2f} €/L</div></div>
         </div></div>""", unsafe_allow_html=True)
 
-    # --- 5. TABS INGREDIENTI ---
     t1, t2, t3, t4 = st.tabs(["🌾 FERMENTABILI", "🌿 LUPPOLI", "🧫 LIEVITO", "🌡️ MASH"])
 
     with t1:
@@ -861,7 +943,7 @@ elif st.session_state.pagina == "Editor":
                 st.rerun()
 
     st.divider()
-    if st.button("💾 SALVA RICETTA NELL'ARCHIVIO", use_container_width=True):
+    if st.button("💾 SALVA RICETTA IN ARCHIVIO GSHEETS", use_container_width=True):
         salva_su_file(
             st.session_state.nome_b,
             st.session_state.stile_b,
@@ -875,4 +957,4 @@ elif st.session_state.pagina == "Editor":
             st.session_state.fg_reale,
             st.session_state.abv_reale
         )
-        st.success("Ricetta salvata con successo!")
+        st.success("Ricetta salvata con successo su Google Sheets!")
