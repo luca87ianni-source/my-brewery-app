@@ -422,7 +422,7 @@ def scala_ingredienti(nuovi_litri, vecchi_litri, fermentabili, luppoli):
 
 # --- 5. FUNZIONI PDF SCHEDA ED ETICHETTE ---
 
-FONT_FILE = "Carnevalee Freakshow.ttf"
+FONT_FILE = "Carnevalee_Freakshow.ttf"
 FONT_NAME = "Freakshow"
 
 def carica_font_personalizzato(pdf):
