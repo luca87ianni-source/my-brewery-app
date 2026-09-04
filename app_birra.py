@@ -154,6 +154,28 @@ def salva_archivio(dati):
     with open("archivio_ricette.json", "w", encoding='utf-8') as f: 
         json.dump(dati, f, indent=4, ensure_ascii=False)
 
+def salva_ricetta_gsheets(nome, stile, data_imb, litri, fermentabili, luppoli, lievito, mash_steps, og_reale, fg_reale, abv_reale):
+    archivio = carica_archivio()
+    archivio[nome] = {
+        "stile": stile,
+        "data_imbottigliamento": data_imb.isoformat() if isinstance(data_imb, date) else str(data_imb),
+        "litri": litri,
+        "fermentabili": fermentabili,
+        "luppoli": luppoli,
+        "yeast": lievito,
+        "mash_steps": mash_steps,
+        "og_reale": og_reale,
+        "fg_reale": fg_reale,
+        "abv_reale": abv_reale
+    }
+    salva_archivio(archivio)
+
+def elimina_ricetta_gsheets(nome):
+    archivio = carica_archivio()
+    if nome in archivio:
+        del archivio[nome]
+        salva_archivio(archivio)
+
 def genera_contesto_aigor(mag, archivio_json):
     """Trasforma i dati del magazzino e archivio in contesto testuale per l'IA"""
     carrello = mag.get("shopping_list", {})
@@ -425,7 +447,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("📁 ARCHIVIO RICETTE")
-    archivio = carica_archivio_dict()
+    archivio = carica_archivio()
     for nome_r in list(archivio.keys()):
         c_side = st.columns([0.8, 0.2])
         if c_side[0].button(f"📖 {nome_r}", key=f"s_{nome_r}", width="stretch"):
@@ -453,15 +475,15 @@ if st.session_state.pagina == "Home":
     st.markdown(" Benvenuto nel sistema centralizzato su Google Sheets. Seleziona una voce dal menu a sinistra per iniziare.")
     
     col_h1, col_h2, col_h3 = st.columns(3)
-    mag = carica_magazzino_dict()
+    mag = carica_magazzino()
     col_h1.metric("Malti in Magazzino", f"{len(mag['Fermentabili'])} tipi")
     col_h2.metric("Luppoli in Magazzino", f"{len(mag['Luppoli'])} tipi")
-    col_h3.metric("Ricette Archiviate", f"{len(carica_archivio_dict())}")
+    col_h3.metric("Ricette Archiviate", f"{len(carica_archivio())}")
 
 # --- 8. PAGINA MAGAZZINO ---
 elif st.session_state.pagina == "Magazzino":
     st.title("📦 Magazzino Scorte")
-    mag = carica_magazzino_dict()
+    mag = carica_magazzino()
     t1, t2, t3 = st.tabs(["Malti", "Luppoli", "Lieviti"])
     
     lista_malti = sorted(df_f_m["Fermentabile"].dropna().tolist()) if not df_f_m.empty and "Fermentabile" in df_f_m.columns else []
@@ -485,7 +507,7 @@ elif st.session_state.pagina == "Magazzino":
             cc[2].write(f"{v.get('prezzo', 0.0):.2f} €")
             if cc[3].button("🗑️", key=f"del_f_{k}"):
                 del mag["Fermentabili"][k]
-                salva_magazzino_dict(mag)
+                salva_magazzino(mag)
                 st.rerun()
 
     with t2:
@@ -505,7 +527,7 @@ elif st.session_state.pagina == "Magazzino":
             cc[2].write(f"{v.get('prezzo', 0.0):.2f} €")
             if cc[3].button("🗑️", key=f"del_l_{k}"):
                 del mag["Luppoli"][k]
-                salva_magazzino_dict(mag)
+                salva_magazzino(mag)
                 st.rerun()
 
     with t3:
@@ -525,7 +547,7 @@ elif st.session_state.pagina == "Magazzino":
             cc[2].write(f"{v.get('prezzo', 0.0):.2f} €")
             if cc[3].button("🗑️", key=f"del_y_{k}"):
                 del mag["Lieviti"][k]
-                salva_magazzino_dict(mag)
+                salva_magazzino(mag)
                 st.rerun()
 
     st.divider()
@@ -550,7 +572,7 @@ elif st.session_state.pagina == "Magazzino":
                 malti_da_comprare = True
         if not malti_da_comprare: st.info("Nessun malto da acquistare.")
         if st.button("🗑️ SVUOTA MALTI", key="clear_c_f", use_container_width=True):
-            mag["shopping_list"]["Fermentabili"] = {}; salva_magazzino_dict(mag); st.rerun()
+            mag["shopping_list"]["Fermentabili"] = {}; salva_magazzino(mag); st.rerun()
 
     with tab_c2:
         luppoli_da_comprare = False
@@ -569,7 +591,7 @@ elif st.session_state.pagina == "Magazzino":
                 luppoli_da_comprare = True
         if not luppoli_da_comprare: st.info("Nessun luppolo da acquistare.")
         if st.button("🗑️ SVUOTA LUPPOLI", key="clear_c_l", use_container_width=True):
-            mag["shopping_list"]["Luppoli"] = {}; salva_magazzino_dict(mag); st.rerun()
+            mag["shopping_list"]["Luppoli"] = {}; salva_magazzino(mag); st.rerun()
 
     with tab_c3:
         lieviti_da_comprare = False
@@ -581,12 +603,12 @@ elif st.session_state.pagina == "Magazzino":
                 lieviti_da_comprare = True
         if not lieviti_da_comprare: st.info("Nessun lievito da acquistare.")
         if st.button("🗑️ SVUOTA LIEVITI", key="clear_c_y", use_container_width=True):
-            mag["shopping_list"]["Lieviti"] = {}; salva_magazzino_dict(mag); st.rerun()
+            mag["shopping_list"]["Lieviti"] = {}; salva_magazzino(mag); st.rerun()
 
 # --- 9. PAGINA EDITOR RICETTA ---
 elif st.session_state.pagina == "Editor":
     st.title(f"🛠️ Editor: {st.session_state.nome_b}")
-    mag = carica_magazzino_dict()
+    mag = carica_magazzino()
     
     c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
     st.session_state.nome_b = c1.text_input("NOME", value=st.session_state.nome_b)
@@ -808,7 +830,7 @@ elif st.session_state.pagina == "AIGOR":
         st.error("⚠️ Chiave API non trovata nei Secrets o nel file key_gemini.txt!")
         st.stop()
 
-    mag = carica_magazzino_dict()
+    mag = carica_magazzino()
 
     with st.container(border=True):
         st.subheader("🎯 Parametri di Ottimizzazione")
