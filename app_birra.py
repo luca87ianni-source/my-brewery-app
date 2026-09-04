@@ -32,31 +32,42 @@ def get_gspread_client():
                 scopes=SCOPES
             )
             return gspread.authorize(creds)
-        else:
-            return None
+        return None
     except Exception as e:
         st.error(f"Errore di autenticazione GSpread: {e}")
         return None
 
 def get_spreadsheet():
-    """Recupera l'oggetto Spreadsheet da URL, Key o Nome dal file Google Drive."""
+    """Recupera l'oggetto Spreadsheet aprendolo da ID, URL o Nome."""
     gc = get_gspread_client()
     if not gc:
         return None
     try:
-        # 1. Se hai l'URL esplicito nei Secrets
-        if "SPREADSHEET_URL" in st.secrets:
-            return gc.open_by_url(st.secrets["SPREADSHEET_URL"])
-        
-        # 2. Se hai l'ID dello Sheet nei Secrets (es. SPREADSHEET_ID = "1aB2c3...")
-        if "SPREADSHEET_ID" in st.secrets:
+        if "SPREADSHEET_ID" in st.secrets and st.secrets["SPREADSHEET_ID"]:
             return gc.open_by_key(st.secrets["SPREADSHEET_ID"])
-
-        # 3. Fallback: apre per nome del file su Google Drive
+        if "SPREADSHEET_URL" in st.secrets and st.secrets["SPREADSHEET_URL"]:
+            return gc.open_by_url(st.secrets["SPREADSHEET_URL"])
         return gc.open("SonsOfBrewery_DB")
     except Exception as e:
-        st.error(f"Impossibile aprire il foglio Google: {e}")
+        # Evitiamo di bloccare l'interfaccia con errori rossi continui
         return None
+
+# Funzione universale e protetta con cache per leggere qualsiasi scheda
+@st.cache_data(ttl=120)
+def read_sheet_data(worksheet_name):
+    """Legge una scheda da Google Sheets memorizzando i dati in cache per 2 minuti."""
+    spreadsheet = get_spreadsheet()
+    if not spreadsheet:
+        return pd.DataFrame()
+    try:
+        ws = spreadsheet.worksheet(worksheet_name)
+        data = ws.get_all_records()
+        return pd.DataFrame(data)
+    except Exception:
+        return pd.DataFrame()
+
+# Definizione di fallback per compatibilità retroattiva con le vecchie funzioni
+sh = get_spreadsheet()
 
 # --- CARICAMENTO API KEY GEMINI (MODALITÀ SICURA) ---
 def get_api_key():
